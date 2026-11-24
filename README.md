@@ -2,6 +2,8 @@
 
 Focus on one task at a time, measure where your time actually goes, keep a done list, and reflect every week — with all data stored as plain Markdown in your vault.
 
+![Questlog Home with today's tasks, the done list and a timeline of the day](images/home.png)
+
 Questlog is built around six principles:
 
 1. **Only one task visible.** The Focus tab shows exactly one task: the one you are working on, or the next one in today's plan.
@@ -40,6 +42,10 @@ Questlog works offline. It makes no network requests, collects no data, and only
 | **Focus** | One task, a large clock with an optional time box (25 / 50 / 90 min), a session note, and the next tasks of the day. |
 | **Quests** | Quest cards with weekly progress; open one for its tasks, stats and settings. Create, pause, finish and reorder quests. |
 | **Review** | The week in numbers: quest work vs. *Other*, hours per quest against target, a per-day chart, an 8-week trend, the done list, and the weekly questions. |
+
+![The Plan tab with a backlog and one column per day](images/plan.png)
+
+![The Focus tab with one task and a running clock](images/focus.png)
 
 The layout adapts to the pane: a wide main tab, a narrow sidebar, or a phone. All controls are visible without hovering.
 
