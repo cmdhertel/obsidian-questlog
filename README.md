@@ -13,6 +13,23 @@ Questlog is built around six principles:
 
 Questlog is standalone: it only writes into its own folder and never touches your daily notes or other plugins' files.
 
+## Installation
+
+In Obsidian, open **Settings → Community plugins → Browse**, search for **Questlog**, then install and enable it. Requires Obsidian 1.7.2 or later; works on desktop and mobile.
+
+Manual installation: download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/cmdhertel/obsidian-questlog/releases/latest) into `<vault>/.obsidian/plugins/questlog/` and enable the plugin.
+
+## Getting started
+
+1. Run **Questlog: Open** from the command palette, or click the target icon in the ribbon.
+2. Create a quest in the **Quests** tab and give it a *why* and a weekly hour target.
+3. Add a few tasks to today in **Home** or **Plan**.
+4. Open **Focus** and press **Start**.
+
+## Privacy
+
+Questlog works offline. It makes no network requests, collects no data, and only writes to its own folder and its plugin settings.
+
 ## Tabs
 
 | Tab | What it does |
@@ -95,12 +112,16 @@ The interface is in English and German and follows Obsidian's language setting. 
 ```bash
 npm install
 npm run dev            # watch build
-npm test               # unit tests (vitest)
+npm run check          # type check, Obsidian lint rules, unit tests
 npm run build          # type check + production bundle
 VAULT=/path/to/vault npm run install:vault
 ```
 
-To release, run `npm version patch|minor|major`, then push the tag. GitHub Actions creates a draft release with `main.js`, `manifest.json` and `styles.css`.
+To release, run `npm version patch|minor|major`, then `git push --follow-tags`. GitHub Actions creates a draft release with `main.js`, `manifest.json` and `styles.css`; add notes and publish it.
+
+## Credits
+
+Inspired by Niklas Steenfatt's Quest app. Questlog is an independent project and not affiliated with it.
 
 ## License
 

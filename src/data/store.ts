@@ -1,5 +1,5 @@
 // Reads and writes quests, the Other inbox, day logs and reviews as Markdown notes, and keeps an in-memory index.
-import { App, Events, TFile, TFolder, normalizePath, type CachedMetadata } from "obsidian";
+import { App, Events, TFile, TFolder, normalizePath } from "obsidian";
 import type { QuestlogSettings } from "../settings";
 import { t, variants } from "../i18n";
 import { isoDay, isoWeek } from "./dates";
@@ -117,7 +117,7 @@ export class QuestStore extends Events {
 
   private async readFile(f: TFile): Promise<void> {
     const kind = this.kind(f.path);
-    const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? {};
+    const fm: Record<string, unknown> = this.app.metadataCache.getFileCache(f)?.frontmatter ?? {};
     const content = await this.app.vault.cachedRead(f);
     if (kind === "quest") this.quests.push(this.toQuest(f, fm, content));
     else if (kind === "other") this.other = { ...this.emptyOther(), tasks: md.parseTasks(content, f.path) };
@@ -133,7 +133,7 @@ export class QuestStore extends Events {
     }
   }
 
-  private toQuest(f: TFile, fm: NonNullable<CachedMetadata["frontmatter"]>, content: string): Quest {
+  private toQuest(f: TFile, fm: Record<string, unknown>, content: string): Quest {
     const status: QuestStatus = fm.status === "done" || fm.status === "paused" ? fm.status : "active";
     const idx = Math.abs(hash(f.basename)) % PALETTE.length;
     return {

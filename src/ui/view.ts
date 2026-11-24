@@ -104,8 +104,8 @@ export class QuestlogView extends ItemView {
       }, 50);
     });
     // Leaving fullscreen (Esc in the browser, window controls) also leaves zen mode.
-    this.registerDomEvent(document, "fullscreenchange", () => {
-      if (this.state.zen && document.fullscreenElement !== this.contentEl) this.setZen(false);
+    this.registerDomEvent(root, "fullscreenchange", () => {
+      if (this.state.zen && this.contentEl.doc.fullscreenElement !== this.contentEl) this.setZen(false);
     });
     this.registerDomEvent(root, "keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape" && this.state.zen) {
@@ -123,12 +123,12 @@ export class QuestlogView extends ItemView {
     this.state.zen = on;
     this.contentEl.toggleClass("is-zen", on);
     if (on) {
-      if (Platform.isDesktopApp && !document.fullscreenElement) {
+      if (Platform.isDesktopApp && !this.contentEl.doc.fullscreenElement) {
         this.contentEl.requestFullscreen?.().catch(() => undefined);
       }
       if (this.tab !== "focus") return this.showTab("focus");
-    } else if (document.fullscreenElement === this.contentEl) {
-      void document.exitFullscreen().catch(() => undefined);
+    } else if (this.contentEl.doc.fullscreenElement === this.contentEl) {
+      void this.contentEl.doc.exitFullscreen().catch(() => undefined);
     }
     this.render();
     if (on) this.contentEl.focus();
@@ -150,7 +150,7 @@ export class QuestlogView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    if (document.fullscreenElement === this.contentEl) void document.exitFullscreen().catch(() => undefined);
+    if (this.contentEl.doc.fullscreenElement === this.contentEl) void this.contentEl.doc.exitFullscreen().catch(() => undefined);
     this.contentEl.empty();
   }
 
@@ -158,7 +158,7 @@ export class QuestlogView extends ItemView {
     if (tab !== "focus" && this.state.zen) {
       this.state.zen = false;
       this.contentEl.removeClass("is-zen");
-      if (document.fullscreenElement === this.contentEl) void document.exitFullscreen().catch(() => undefined);
+      if (this.contentEl.doc.fullscreenElement === this.contentEl) void this.contentEl.doc.exitFullscreen().catch(() => undefined);
     }
     if (this.tab !== tab) {
       this.tab = tab;
@@ -170,10 +170,10 @@ export class QuestlogView extends ItemView {
 
   /** True while the user types in a field that a re-render would destroy (add fields are restored instead). */
   private isEditing(): boolean {
-    const a = document.activeElement;
+    const a = this.contentEl.doc.activeElement;
     if (!a || !this.contentEl.contains(a)) return false;
-    if (a instanceof HTMLInputElement && a.dataset.addKey) return false;
-    return a instanceof HTMLTextAreaElement || (a instanceof HTMLInputElement && a.type !== "checkbox");
+    if (a.instanceOf(HTMLInputElement) && a.dataset.addKey) return false;
+    return a.instanceOf(HTMLTextAreaElement) || (a.instanceOf(HTMLInputElement) && a.type !== "checkbox");
   }
 
   refresh(): void {
@@ -188,9 +188,9 @@ export class QuestlogView extends ItemView {
   private render(): void {
     this.deferred = false;
     const scroll = this.bodyEl.scrollTop;
-    const focused = document.activeElement;
-    const addKey = focused instanceof HTMLInputElement && this.contentEl.contains(focused) ? focused.dataset.addKey : undefined;
-    const addValue = addKey && focused instanceof HTMLInputElement ? focused.value : "";
+    const focused = this.contentEl.doc.activeElement;
+    const addKey = focused?.instanceOf(HTMLInputElement) && this.contentEl.contains(focused) ? focused.dataset.addKey : undefined;
+    const addValue = addKey && focused?.instanceOf(HTMLInputElement) ? focused.value : "";
     const boards = Array.from(this.bodyEl.querySelectorAll<HTMLElement>("[data-scroll-key]")).map((el) => [el.dataset.scrollKey, el.scrollLeft] as const);
     const reviewDue =
       new Date().getDay() === this.plugin.settings.reviewDay && this.plugin.store.reviewMissing(isoDay(new Date()));

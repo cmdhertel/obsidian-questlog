@@ -143,10 +143,13 @@ export default class QuestlogPlugin extends Plugin {
       this.statusEl.setAttr("aria-label", c ? t("status.open") : "");
     }
     // Live clocks: elapsed time, or the remaining time of a time box (data-box, minutes).
-    for (const el of Array.from(document.querySelectorAll<HTMLElement>(".ql-elapsed[data-start]"))) {
-      const box = Number(el.dataset.box) || 0;
-      el.setText(clockText(Number(el.dataset.start), box));
-      el.toggleClass("is-over", box > 0 && Date.now() - Number(el.dataset.start) > box * 60_000);
+    // Looked up per view, so clocks in pop-out windows keep running too.
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      for (const el of Array.from(leaf.view.containerEl.querySelectorAll<HTMLElement>(".ql-elapsed[data-start]"))) {
+        const box = Number(el.dataset.box) || 0;
+        el.setText(clockText(Number(el.dataset.start), box));
+        el.toggleClass("is-over", box > 0 && Date.now() - Number(el.dataset.start) > box * 60_000);
+      }
     }
     this.timer.checkBox();
   }
@@ -155,6 +158,13 @@ export default class QuestlogPlugin extends Plugin {
     const data = ((await this.loadData()) ?? {}) as Partial<QuestlogSettings> & { dailyQuestions?: unknown };
     delete data.dailyQuestions; // removed in 0.2
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+  }
+
+  /** data.json was changed by sync: take over the new settings and timer instead of overwriting them. */
+  async onExternalSettingsChange(): Promise<void> {
+    await this.loadSettings();
+    await this.store.reload();
+    this.refreshViews();
   }
 
   async saveSettings(): Promise<void> {

@@ -14,7 +14,7 @@ export class ConfirmModal extends Modal {
     new Setting(this.contentEl)
       .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))
       .addButton((b) =>
-        b.setButtonText(t("common.delete")).setWarning().onClick(() => {
+        b.setButtonText(t("common.delete")).setClass("mod-warning").onClick(() => {
           this.close();
           this.onYes();
         }),
@@ -229,7 +229,7 @@ export class SessionModal extends Modal {
     if (this.existing) {
       const ex = this.existing;
       buttons.addButton((b) =>
-        b.setButtonText(t("common.delete")).setWarning().onClick(async () => {
+        b.setButtonText(t("common.delete")).setClass("mod-warning").onClick(async () => {
           await store.deleteSession(ex);
           this.close();
         }),

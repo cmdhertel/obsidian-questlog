@@ -1,10 +1,10 @@
 {
   "id": "questlog",
   "name": "Questlog",
-  "version": "0.2.0",
-  "minAppVersion": "1.5.0",
+  "version": "1.0.0",
+  "minAppVersion": "1.7.2",
   "description": "Focus on one task at a time, measure the time you invest, keep a done list, and reflect weekly. Quests, tasks and time logs are plain Markdown.",
   "author": "Gian Luca Hertel",
-  "authorUrl": "",
+  "authorUrl": "https://github.com/cmdhertel",
   "isDesktopOnly": false
 }
