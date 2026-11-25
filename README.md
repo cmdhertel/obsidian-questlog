@@ -121,7 +121,14 @@ npm run dev            # watch build
 npm run check          # type check, Obsidian lint rules, unit tests
 npm run build          # type check + production bundle
 VAULT=/path/to/vault npm run install:vault
+npm run smoke          # macOS: runs the built plugin in a separate Obsidian (see below)
 ```
+
+### Smoke test
+
+`npm run smoke` builds the plugin, generates a demo vault (three quests, six weeks of sessions, no real content) and starts its **own** Obsidian with a separate profile and debugging port, in a new folder in the system's temp directory. It drives the app over the Chrome DevTools Protocol, runs the steps in `scripts/smoke/steps.mjs` (six tabs, timer, Start box, continue, play buttons, start earlier, modals) at three sizes in English and German, and writes `report.txt` and screenshots to `.smoke/out/<run>/` (git-ignored). The exit code is non-zero if a step fails. It does not touch your vault or your Obsidian profile, and it stops only the process it started. Your own Obsidian may keep running.
+
+Options: `-- --keep` keeps the demo vault and profile, `-- --only <text>` runs matching steps, `-- --lang en|de`, `-- --no-build`, `-- --fail-test` adds a step that fails on purpose. Environment: `OBSIDIAN_BIN` (default `/Applications/Obsidian.app/Contents/MacOS/Obsidian`), `SMOKE_PORT`, `SMOKE_DIR` (parent of the work folder, must be inside the temp directory), `SMOKE_SCALE` (screenshot pixel ratio, default 1). The demo vault alone: `node scripts/smoke/demo-vault.mjs <empty-folder>`. To add a step, append an object to `steps` in `scripts/smoke/steps.mjs`; the comment at the top of that file explains the helpers. Phone size uses Obsidian's internal mobile emulation and is only a precheck. CI does not run the smoke test.
 
 To release, run `npm version patch|minor|major`, then `git push --follow-tags`. GitHub Actions creates a draft release with `main.js`, `manifest.json` and `styles.css`; add notes and publish it.
 

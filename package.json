@@ -12,7 +12,8 @@
     "version": "node version-bump.mjs && git add manifest.json versions.json",
     "install:vault": "node scripts/install-vault.mjs",
     "check": "npm run typecheck && npm run lint && npm test",
-    "typecheck": "tsc --noEmit --skipLibCheck"
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "smoke": "node scripts/smoke.mjs"
   },
   "keywords": [
     "obsidian",
