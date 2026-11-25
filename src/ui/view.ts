@@ -12,6 +12,18 @@ import { renderFocus } from "./tabs/focus";
 import { renderQuests } from "./tabs/quests";
 import { renderReview } from "./tabs/review";
 import { timerBar } from "./components";
+import { captureBar } from "./capturebar";
+import type { RitualId } from "../data/rituals";
+import type { Period } from "../data/periods";
+
+/** The ritual card open on Home: which one, for which day (or quest for a check-in), and its step. */
+export interface OpenRitual {
+  id: RitualId;
+  day: string;
+  step: number;
+  /** Check-in: the quest name. */
+  quest?: string;
+}
 
 export const VIEW_TYPE = "questlog-view";
 
@@ -38,9 +50,13 @@ export interface UiState {
   planDay: string;
   calendarDay: string;
   reviewDay: string;
+  /** Review period shown in the Review tab (#23). */
+  reviewPeriod: Period;
   questsMode: "active" | "done";
   /** Quest whose detail page is open in the Quests tab. */
   questOpen: string | null;
+  /** Detail page of a quest: the stage path or the story. */
+  questView: "path" | "story";
   expanded: Set<string>;
   drafts: Map<string, string>;
   /** Task chosen in Focus while no timer runs (null = first planned task). */
@@ -49,6 +65,15 @@ export interface UiState {
   focusNote: string;
   /** Zen mode: Focus shows only the clock and the task. */
   zen: boolean;
+  /** Ritual card open on Home (#18); null = the one-line suggestion, if any. */
+  ritual: OpenRitual | null;
+  /** A quiet line on Home after a ritual finished ("Day closed."), until the tab changes. */
+  ritualNote: string | null;
+  /** Plan backlog filter (#27): the quest chip (quest name, null = all) and the search text. Not saved. */
+  backlogQuest: string | null;
+  backlogQuery: string;
+  /** Plan backlog opened from its rail as an overlay (wide panes under about 1100 px). */
+  backlogOpen: boolean;
 }
 
 export type Width = "wide" | "mid" | "narrow";
@@ -57,7 +82,10 @@ export class QuestlogView extends ItemView {
   private tab: TabId;
   private tabsEl!: HTMLElement;
   private bodyEl!: HTMLElement;
+  /** Below the scrolling body: the phone capture bar (#28). */
+  private footEl!: HTMLElement;
   private deferred = false;
+  private closed = false;
   state: UiState;
   width: Width = "wide";
 
@@ -69,14 +97,21 @@ export class QuestlogView extends ItemView {
       planDay: today,
       calendarDay: today,
       reviewDay: today,
+      reviewPeriod: "week",
       questsMode: "active",
       questOpen: null,
+      questView: "path",
       expanded: new Set(),
       drafts: new Map(),
       focusTask: null,
       focusBox: plugin.settings.pomodoroMinutes,
       focusNote: "",
       zen: false,
+      ritual: null,
+      ritualNote: null,
+      backlogQuest: null,
+      backlogQuery: "",
+      backlogOpen: false,
     };
   }
 
@@ -91,16 +126,18 @@ export class QuestlogView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.closed = false;
     const root = this.contentEl;
     root.empty();
     root.addClass("questlog");
     root.setAttr("tabindex", "-1");
     this.tabsEl = root.createDiv({ cls: "ql-tabs", attr: { role: "tablist" } });
     this.bodyEl = root.createDiv({ cls: "ql-body" });
+    this.footEl = root.createDiv({ cls: "ql-foot" });
     // Don't re-render under the user's cursor; catch up when they leave the field.
     this.registerDomEvent(root, "focusout", () => {
-      window.setTimeout(() => {
-        if (this.deferred && !this.isEditing()) this.refresh();
+      root.win.setTimeout(() => {
+        if (!this.closed && this.deferred && !this.isEditing()) this.refresh();
       }, 50);
     });
     // Leaving fullscreen (Esc in the browser, window controls) also leaves zen mode.
@@ -150,6 +187,8 @@ export class QuestlogView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.closed = true;
+    this.deferred = false;
     if (this.contentEl.doc.fullscreenElement === this.contentEl) void this.contentEl.doc.exitFullscreen().catch(() => undefined);
     this.contentEl.empty();
   }
@@ -161,6 +200,7 @@ export class QuestlogView extends ItemView {
       if (this.contentEl.doc.fullscreenElement === this.contentEl) void this.contentEl.doc.exitFullscreen().catch(() => undefined);
     }
     if (this.tab !== tab) {
+      this.state.ritualNote = null;
       this.tab = tab;
       this.plugin.settings.lastTab = tab;
       void this.plugin.saveSettings();
@@ -168,12 +208,30 @@ export class QuestlogView extends ItemView {
     this.render();
   }
 
+  /** Open a ritual card on Home, whatever the time and dismissals (commands and the ritual line). */
+  openRitual(r: Omit<OpenRitual, "step">): void {
+    // Drafts belong to one card: another ritual, day or quest must not inherit them (e.g. yesterday's sentence).
+    const was = this.state.ritual;
+    if (!was || was.id !== r.id || was.day !== r.day || was.quest !== r.quest) {
+      for (const k of [...this.state.drafts.keys()]) if (k.startsWith("ritual:")) this.state.drafts.delete(k);
+    }
+    this.state.ritual = { ...r, step: 0 };
+    this.state.ritualNote = null;
+    this.showTab("home");
+    // Bring the card into view and put the keyboard on it.
+    const card = this.bodyEl.querySelector<HTMLElement>(".ql-ritual-card");
+    if (card) {
+      card.scrollIntoView({ block: "nearest" });
+      card.focus({ preventScroll: true });
+    }
+  }
+
   /** True while the user types in a field that a re-render would destroy (add fields are restored instead). */
   private isEditing(): boolean {
     const a = this.contentEl.doc.activeElement;
     if (!a || !this.contentEl.contains(a)) return false;
     if (a.instanceOf(HTMLInputElement) && a.dataset.addKey) return false;
-    return a.instanceOf(HTMLTextAreaElement) || (a.instanceOf(HTMLInputElement) && a.type !== "checkbox");
+    return a.instanceOf(HTMLTextAreaElement) || (a.instanceOf(HTMLInputElement) && a.type !== "checkbox" && a.type !== "radio");
   }
 
   refresh(): void {
@@ -223,10 +281,19 @@ export class QuestlogView extends ItemView {
     this.contentEl.toggleClass("is-zen", this.state.zen && this.tab === "focus");
     if (this.tab !== "focus") timerBar(this.bodyEl, ctx);
     RENDER[this.tab](this.bodyEl.createDiv({ cls: `ql-page ql-page-${this.tab}` }), ctx);
+    this.footEl.empty();
+    captureBar(this.footEl, ctx, this.tab === "focus");
     this.bodyEl.scrollTop = scroll;
     for (const [key, left] of boards) {
       const el = this.bodyEl.querySelector<HTMLElement>(`[data-scroll-key="${key}"]`);
       if (el) el.scrollLeft = left;
+    }
+    // A scroller seen for the first time starts at its marked child (the Plan board at today, #27).
+    const remembered = new Set(boards.map(([key]) => key));
+    for (const el of Array.from(this.bodyEl.querySelectorAll<HTMLElement>("[data-scroll-key]"))) {
+      if (remembered.has(el.dataset.scrollKey)) continue;
+      const start = el.querySelector<HTMLElement>(":scope > .is-scroll-start");
+      if (start && el.scrollWidth > el.clientWidth) el.scrollLeft += start.getBoundingClientRect().left - el.getBoundingClientRect().left;
     }
     if (addKey) {
       const input = Array.from(this.bodyEl.querySelectorAll<HTMLInputElement>("input[data-add-key]")).find((i) => i.dataset.addKey === addKey);

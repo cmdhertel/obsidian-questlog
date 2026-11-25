@@ -1,12 +1,16 @@
 // Focus: one task on screen, a big clock with an optional time box, a session note, and what comes next.
 import { setIcon } from "obsidian";
-import { fmtDuration, fmtHours } from "../../data/dates";
+import { fmtDuration, fmtHours, isoDay } from "../../data/dates";
 import { totalMinutes } from "../../data/stats";
 import type { Task } from "../../data/model";
 import { TIME_BOXES } from "../../settings";
+import { workTitle } from "../../data/timerlog";
 import { t } from "../../i18n";
 import type { Ctx } from "../ctx";
-import { TaskSuggestModal } from "../modals";
+import { StartTimeModal, TaskSuggestModal } from "../modals";
+import { clampToday } from "../../data/startearlier";
+import type { StartOpts } from "../../timer";
+import { continueTitle } from "../startbox";
 import { act, button, empty, iconButton, liveClock, questIcon, questName, taskKey, timeOf } from "../components";
 
 export function renderFocus(el: HTMLElement, ctx: Ctx): void {
@@ -29,6 +33,7 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
     const row = stage.createDiv({ cls: "ql-focus-actions" });
     button(row, t("focus.pick"), () => new TaskSuggestModal(plugin, (x) => pick(ctx, x)).open(), { icon: "search", cta: true });
     button(row, t("tab.plan"), () => ctx.view.showTab("plan"), { icon: "list-checks" });
+    continueButton(row, ctx);
     footer(el, ctx);
     return;
   }
@@ -38,11 +43,16 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
 
   iconButton(stage, "maximize-2", t("focus.zen"), () => ctx.view.setZen(true), "ql-focus-zen-btn");
 
-  const qrow = stage.createDiv({ cls: "ql-focus-quest" });
-  if (quest) questIcon(qrow, quest, "is-small");
-  qrow.createSpan({ text: questName(quest, running?.quest ?? "") });
+  // A quest-only run has the quest name as its title, so the small quest row above it is left out.
+  const qname = questName(quest, running?.quest ?? "");
+  const title = workTitle(task?.text ?? running?.taskText ?? "", qname);
+  if (title !== qname) {
+    const qrow = stage.createDiv({ cls: "ql-focus-quest" });
+    if (quest) questIcon(qrow, quest, "is-small");
+    qrow.createSpan({ text: qname });
+  }
   if (quest?.why) stage.createDiv({ cls: "ql-focus-why", text: quest.why });
-  stage.createDiv({ cls: "ql-focus-task", text: task?.text ?? running?.taskText ?? "" });
+  stage.createDiv({ cls: "ql-focus-task", text: title });
 
   // Clock: live while running (counts down within a box), otherwise the box length or 00:00.
   const box = running ? running.box ?? 0 : state.focusBox;
@@ -75,9 +85,9 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
   if (running) button(actions, t("timer.pause"), act(() => plugin.timer.stop()), { icon: "pause" });
   else if (task) {
     button(actions, t("timer.start"), act(async () => {
-      await plugin.timer.start(task, { box: state.focusBox, note: state.focusNote });
-      state.focusNote = "";
+      await startNow(ctx, task, 0);
     }), { icon: "play", cta: true });
+    continueButton(actions, ctx, task);
   }
   if (task) {
     button(actions, t("task.complete"), act(async () => {
@@ -85,6 +95,7 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
       await plugin.complete(task);
     }), { icon: "check", cls: "ql-btn-done" });
   }
+  if (task && !running) startEarlierChips(stage, ctx, task);
   const more = stage.createDiv({ cls: "ql-focus-more" });
   if (task && !running) {
     button(more, t("focus.skip"), act(async () => {
@@ -93,6 +104,10 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
     }), { icon: "skip-forward" });
   }
   button(more, t("focus.pick"), () => new TaskSuggestModal(plugin, (x) => pick(ctx, x)).open(), { icon: "search" });
+  // A run from an earlier day keeps its start; it is split at midnight when it stops.
+  if (running && isoDay(new Date(running.start)) === isoDay(new Date())) {
+    button(more, t("focus.changeStart"), () => new StartTimeModal(plugin).open(), { icon: "clock" });
+  }
   if (running) button(more, t("timer.discardShort"), act(() => plugin.timer.discard()), { icon: "trash-2" });
 
   // Session note
@@ -107,12 +122,12 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
       state.focusNote = note.value;
       return;
     }
-    window.clearTimeout(pending);
-    pending = window.setTimeout(() => void plugin.timer.setNote(note.value), 400);
+    note.win.clearTimeout(pending);
+    pending = note.win.setTimeout(() => void plugin.timer.setNote(note.value), 400);
   };
   note.onblur = () => {
     if (running) {
-      window.clearTimeout(pending);
+      note.win.clearTimeout(pending);
       void plugin.timer.setNote(note.value);
     }
   };
@@ -147,7 +162,7 @@ function renderZen(el: HTMLElement, ctx: Ctx, task: Task | undefined): void {
   const zen = el.createDiv({ cls: "ql-zen" + (running ? " is-running" : "") });
   zen.style.setProperty("--ql-color", quest?.color ?? "var(--interactive-accent)");
 
-  zen.createDiv({ cls: "ql-zen-task", text: task?.text ?? running?.taskText ?? "" });
+  zen.createDiv({ cls: "ql-zen-task", text: workTitle(task?.text ?? running?.taskText ?? "", questName(quest, running?.quest ?? "")) });
   const box = running ? running.box ?? 0 : state.focusBox;
   if (running) liveClock(zen, running.start, box, "ql-focus-clock ql-zen-clock");
   else zen.createDiv({ cls: "ql-focus-clock ql-zen-clock ql-mono is-idle", text: box ? `${String(box).padStart(2, "0")}:00` : "00:00" });
@@ -156,8 +171,7 @@ function renderZen(el: HTMLElement, ctx: Ctx, task: Task | undefined): void {
   if (running) iconButton(row, "pause", t("timer.pause"), act(() => plugin.timer.stop()));
   else if (task) {
     iconButton(row, "play", t("timer.start"), act(async () => {
-      await plugin.timer.start(task, { box: state.focusBox, note: state.focusNote });
-      state.focusNote = "";
+      await startNow(ctx, task, 0);
     }));
   }
   if (task) {
@@ -167,6 +181,18 @@ function renderZen(el: HTMLElement, ctx: Ctx, task: Task | undefined): void {
     }));
   }
   iconButton(row, "minimize-2", t("focus.zenExit"), () => ctx.view.setZen(false));
+}
+
+/** "Continue: <title>" for the last work; nothing when there is nothing to resume or Start already does it. */
+function continueButton(parent: HTMLElement, ctx: Ctx, shown?: Task): void {
+  const { plugin, state } = ctx;
+  const target = plugin.timer.continueTarget();
+  const title = continueTitle(target);
+  if (!title || (target.kind === "task" && target.task === shown)) return;
+  button(parent, t("focus.continue", { title }), act(async () => {
+    await plugin.continueLast({ box: state.focusBox, note: state.focusNote });
+    state.focusNote = "";
+  }), { icon: "rotate-ccw", cls: "ql-btn-continue" });
 }
 
 /** Choose a task for Focus. While a timer runs, switch the timer to it. */
@@ -182,4 +208,35 @@ function footer(el: HTMLElement, ctx: Ctx): void {
   f.createSpan({ text: t("focus.today", { time: fmtHours(totalMinutes(store.sessions([today]))) }) });
   f.createSpan({ text: " · " });
   f.createSpan({ text: t("home.doneCount", { n: store.doneOn(today).length }) });
+}
+
+// ---------------------------------------------------------------- start earlier
+
+const EARLIER_MINUTES = [5, 10, 20];
+
+/** Start now, or n minutes ago within what is already logged today. */
+async function startNow(ctx: Ctx, task: Task, minutesAgo: number): Promise<void> {
+  const { plugin, store, state } = ctx;
+  const opts: StartOpts = { box: state.focusBox, note: state.focusNote };
+  const now = Date.now();
+  const clamp = minutesAgo > 0 ? clampToday(now - minutesAgo * 60_000, now, store.sessions([isoDay(new Date(now))]), now) : null;
+  if (clamp) opts.startedAt = clamp.start;
+  await plugin.timer.start(task, opts);
+  state.focusNote = "";
+  if (clamp) StartTimeModal.announce(clamp.clamped, clamp.start);
+}
+
+/** "Started [5 min ago] [10 min ago] [20 min ago]": each starts the timer right away. */
+function startEarlierChips(stage: HTMLElement, ctx: Ctx, task: Task): void {
+  const row = stage.createDiv({ cls: "ql-start-earlier" });
+  row.createSpan({ cls: "ql-start-earlier-label", text: t("focus.startedLabel") });
+  const group = row.createDiv({ cls: "ql-chips", attr: { role: "group", "aria-label": t("focus.startedGroup") } });
+  for (const n of EARLIER_MINUTES) {
+    const c = group.createEl("button", {
+      cls: "ql-chip-btn",
+      text: t("focus.startedAgo", { n }),
+      attr: { "aria-label": t("focus.startedAgoLong", { n }) },
+    });
+    c.onclick = act(() => startNow(ctx, task, n));
+  }
 }

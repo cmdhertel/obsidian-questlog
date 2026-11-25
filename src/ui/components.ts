@@ -1,9 +1,11 @@
 import { Menu, Notice, setIcon, setTooltip } from "obsidian";
 import type { Quest, Task } from "../data/model";
 import { addDays, fmtDuration, parseDay } from "../data/dates";
+import type { ContinueTarget } from "../data/lastwork";
 import type { Position } from "../data/plan";
-import { t } from "../i18n";
+import { fmtDate, t } from "../i18n";
 import type { Ctx } from "./ctx";
+import { workTitle } from "../data/timerlog";
 import { ConfirmModal, TextModal } from "./modals";
 
 const DRAG_TYPE = "application/x-questlog-task";
@@ -26,6 +28,45 @@ export function iconButton(parent: HTMLElement, icon: string, label: string, onC
     e.stopPropagation();
     onClick();
   };
+  return b;
+}
+
+export interface PlayOpts {
+  /** Text button ("Start" / "Pause") instead of an icon button. */
+  text?: boolean;
+  /** Pause instead of play; defaults to "the timer runs exactly this target". */
+  running?: boolean;
+  cls?: string;
+}
+
+/** Name of the work a target stands for, used in the button's label. */
+function targetName(target: ContinueTarget): string {
+  return target.kind === "task" ? target.task.text : target.kind === "quest" ? questName(target.quest) : "";
+}
+
+/**
+ * Play or pause for a piece of work, by the live timer state. Play starts the target, pause stops
+ * and logs. Returns null for kind "none" (nothing to start). Views re-render on every timer change,
+ * so the icon never goes stale.
+ */
+export function playButton(parent: HTMLElement, ctx: Ctx, target: ContinueTarget, opts: PlayOpts = {}): HTMLButtonElement | null {
+  if (target.kind === "none") return null;
+  const timer = ctx.plugin.timer;
+  const running = opts.running ?? timer.isRunningTarget(target);
+  const work = targetName(target);
+  const label = t(running ? "timer.pauseWork" : "timer.startWork", { work });
+  const run = act(() => (running ? timer.stop() : timer.startTarget(target)));
+  const cls = `ql-play${running ? " is-live" : ""} ${opts.cls ?? ""}`.trim();
+  let b: HTMLButtonElement;
+  if (opts.text) {
+    b = button(parent, t(running ? "timer.pause" : "timer.start"), run, { icon: running ? "pause" : "play", cls });
+    setTooltip(b, label);
+  } else {
+    b = iconButton(parent, running ? "pause" : "play", label, run, cls);
+  }
+  b.setAttr("aria-label", label);
+  // Enter/Space on the button must not reach a parent that is itself a keyboard button (quest card).
+  b.onkeydown = (e) => e.stopPropagation();
   return b;
 }
 
@@ -162,11 +203,14 @@ export function timerBar(parent: HTMLElement, ctx: Ctx): void {
   el.createSpan({ cls: "ql-live-dot" });
   liveClock(el, c.start, c.box ?? 0);
   const txt = el.createDiv({ cls: "ql-timerbar-text" });
-  txt.createSpan({ cls: "ql-timerbar-task", text: c.taskText });
-  txt.createSpan({ cls: "ql-muted", text: ` · ${questName(q, c.quest)}` });
+  const qname = questName(q, c.quest);
+  const title = workTitle(c.taskText, qname);
+  txt.createSpan({ cls: "ql-timerbar-task", text: title });
+  // A quest-only run already shows the quest as its title.
+  if (title !== qname) txt.createSpan({ cls: "ql-muted", text: ` · ${qname}` });
   el.onclick = () => ctx.view.showTab("focus");
   iconButton(el, "pause", t("timer.pause"), act(() => ctx.plugin.timer.stop()));
-  iconButton(el, "check", t("task.complete"), act(() => ctx.plugin.completeCurrent()));
+  if (c.taskId) iconButton(el, "check", t("task.complete"), act(() => ctx.plugin.completeCurrent()));
 }
 
 // ---------------------------------------------------------------- tasks
@@ -178,6 +222,16 @@ export interface TaskRowOpts {
   compact?: boolean;
   /** Extra note shown after the text (e.g. "carried over"). */
   hint?: string;
+  /** Clamp the text to three lines with a button to show all of it (#27, board cards). */
+  expandable?: boolean;
+}
+
+/** Show the expand button of every clamped task text under `root` whose text is really cut off. */
+export function revealClampButtons(root: HTMLElement): void {
+  root.querySelectorAll<HTMLElement>(".ql-task-text.ql-clamp:not(.is-open)").forEach((text) => {
+    const btn = text.parentElement?.querySelector<HTMLElement>(".ql-task-expand");
+    if (btn && text.clientHeight > 0) btn.hidden = text.scrollHeight <= text.clientHeight + 1;
+  });
 }
 
 /** Key that finds a task even before it has an id. */
@@ -200,7 +254,10 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
   });
   if (quest) row.style.setProperty("--ql-color", quest.color);
 
-  const cb = row.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox ql-check" });
+  // The label gives the small checkbox a 44 px hit area on touch screens (see styles.css, #29).
+  const hit = row.createEl("label", { cls: "ql-check-hit" });
+  hit.onclick = (e) => e.stopPropagation();
+  const cb = hit.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox ql-check" });
   cb.checked = task.done;
   cb.setAttr("aria-label", task.done ? t("task.reopen") : t("task.complete"));
   cb.onclick = (e) => e.stopPropagation();
@@ -210,7 +267,32 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
   });
 
   const main = row.createDiv({ cls: "ql-task-main" });
-  main.createSpan({ cls: "ql-task-text", text: task.text });
+  const text = main.createSpan({ cls: "ql-task-text", text: task.text });
+  if (opts.expandable) {
+    const key = `task:${taskKey(task)}`;
+    const open = ctx.state.expanded.has(key);
+    text.addClass("ql-clamp");
+    text.style.setProperty("--ql-clamp", "3");
+    text.toggleClass("is-open", open);
+    const more = main.createEl("button", { cls: "ql-linkbtn ql-small ql-task-expand", attr: { "aria-expanded": String(open) } });
+    const label = (isOpen: boolean) => {
+      more.setText(t(isOpen ? "task.collapse" : "task.expand"));
+      more.setAttr("aria-label", `${t(isOpen ? "task.collapse" : "task.expand")}: ${task.text.slice(0, 60)}`);
+    };
+    label(open);
+    more.hidden = !open;
+    more.onclick = (e) => {
+      e.stopPropagation();
+      const next = !ctx.state.expanded.has(key);
+      if (next) ctx.state.expanded.add(key);
+      else ctx.state.expanded.delete(key);
+      text.toggleClass("is-open", next);
+      more.setAttr("aria-expanded", String(next));
+      label(next);
+    };
+    // The button appears only when the text is really cut off (checked after layout).
+    if (!open) row.win.requestAnimationFrame(() => revealClampButtons(row));
+  }
   if ((opts.showQuest && quest) || opts.hint) {
     const meta = main.createDiv({ cls: "ql-task-meta" });
     if (opts.showQuest && quest) {
@@ -230,9 +312,8 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
   }
 
   const actions = row.createDiv({ cls: "ql-task-actions" });
-  if (!task.done) {
-    if (running) iconButton(actions, "pause", t("timer.pause"), act(() => plugin.timer.stop()), "is-live");
-    else iconButton(actions, "play", t("timer.start"), act(() => plugin.timer.start(task)));
+  if (!task.done && quest && (running || store.isWorkable(quest))) {
+    playButton(actions, ctx, { kind: "task", task, quest }, { cls: "ql-task-play" });
   }
   iconButton(actions, "more-horizontal", t("task.more"), () => {}).onclick = (e) => {
     e.stopPropagation();
@@ -250,11 +331,17 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
       e.dataTransfer?.setData(DRAG_TYPE, taskKey(task));
       e.dataTransfer?.setData("text/plain", task.text);
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-      window.setTimeout(() => row.addClass("is-dragging"), 0);
+      row.win.setTimeout(() => row.addClass("is-dragging"), 0);
     };
     row.ondragend = () => row.removeClass("is-dragging");
   }
   return row;
+}
+
+/** Short label for a planned day: "Today" or "Mon, Nov 24". */
+export function dayHint(day: string, today: string): string {
+  if (day === today) return t("nav.today");
+  return fmtDate(parseDay(day), { weekday: "short", day: "numeric", month: "short" });
 }
 
 /** Days offered in the "Move to" menu: today and the next six days. */
@@ -271,14 +358,14 @@ function taskMenu(ctx: Ctx, task: Task, quest: Quest | undefined): Menu {
   const m = new Menu();
   const today = ctx.today;
   if (!task.done) {
-    m.addItem((i) =>
+    if (quest && store.isWorkable(quest)) m.addItem((i) =>
       i.setTitle(t("focus.now")).setIcon("crosshair").onClick(act(async () => {
         await store.moveToDay(task, today, "top");
         await plugin.timer.start(task);
         ctx.view.showTab("focus");
       })),
     );
-    m.addSeparator();
+    if (quest && store.isWorkable(quest)) m.addSeparator();
     const current = store.scheduledDay(task, today);
     for (const { day, label } of moveTargets(today)) {
       m.addItem((i) =>
@@ -300,6 +387,26 @@ function taskMenu(ctx: Ctx, task: Task, quest: Quest | undefined): Menu {
       }),
     );
   }
+  if (quest?.stages.length) {
+    m.addSeparator();
+    m.addItem((i) => i.setTitle(t("stage.moveTask")).setIsLabel(true));
+    for (const s of quest.stages) {
+      m.addItem((i) =>
+        i
+          .setTitle(s.name || `${t("stage.title")} ${s.index + 1}`)
+          .setIcon(s.reached ? "check" : "milestone")
+          .setChecked(task.stageIndex === s.index)
+          .onClick(act(() => (task.stageIndex === s.index ? Promise.resolve() : store.moveTaskToStage(task, s)))),
+      );
+    }
+    m.addItem((i) =>
+      i
+        .setTitle(t("stage.loose"))
+        .setIcon("list")
+        .setChecked(task.stageIndex === null)
+        .onClick(act(() => (task.stageIndex === null ? Promise.resolve() : store.moveTaskToStage(task, "loose")))),
+    );
+  }
   m.addSeparator();
   m.addItem((i) =>
     i.setTitle(t("task.delete")).setIcon("trash-2").setWarning(true).onClick(() =>
@@ -319,7 +426,7 @@ export function dropTarget(list: HTMLElement, ctx: Ctx, day: string | null): voi
     list.querySelectorAll(".is-drop-before").forEach((el) => el.removeClass("is-drop-before"));
   };
   const rowAt = (e: DragEvent): HTMLElement | null => {
-    const rows = Array.from(list.querySelectorAll<HTMLElement>(".ql-task[data-key]:not(.is-done):not(.is-dragging)"));
+    const rows = Array.from(list.querySelectorAll<HTMLElement>(".ql-task[data-key]:not(.is-done):not(.is-dragging):not([hidden])"));
     return rows.find((r) => {
       const b = r.getBoundingClientRect();
       return e.clientY < b.top + b.height / 2;

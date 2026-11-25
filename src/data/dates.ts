@@ -17,6 +17,15 @@ export function addDays(day: string, n: number): string {
   return isoDay(d);
 }
 
+/** Whole days from `from` to `to` (negative when `to` is earlier). Counted on UTC dates, so a DST change cannot shift it. */
+export function daysBetween(from: string, to: string): number {
+  const utc = (day: string) => {
+    const [y, m, d] = day.split("-").map(Number);
+    return Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1);
+  };
+  return Math.round((utc(to) - utc(from)) / 86400000);
+}
+
 /** Monday of the ISO week containing `day`. */
 export function weekStart(day: string): string {
   const d = parseDay(day);

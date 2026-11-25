@@ -94,6 +94,12 @@ plan: []
     expect(md.parseSessions(early, "d")[0]!.taskText).toBe("Early");
   });
 
+  it("round-trips a session without a task text as a dash", () => {
+    const line = md.sessionLine({ start: 540, end: 580, taskText: "", quest: "Travel book", taskId: "" });
+    expect(line).toBe("- 09:00–09:40 — · [[Travel book]]");
+    expect(md.parseSessions(line, "d")[0]).toMatchObject({ start: 540, end: 580, taskText: "—", taskId: "", quest: "Travel book" });
+  });
+
   it("round-trips a session note and keeps it out of the link", () => {
     const line = md.sessionLine({ start: 555, end: 605, taskText: "Draft", quest: "Q", taskId: "abc123", note: "intro\n  done — mostly" });
     expect(line).toBe("- 09:15–10:05 Draft · [[Q]] 🆔 abc123 — intro done — mostly");
@@ -119,7 +125,8 @@ describe("answers", () => {
     expect(md.readAnswers(w, "Reflection")).toEqual({ "Went well?": "Lots", "Next?": "More\nlines" });
     expect(md.parseSessions(w, "d")).toHaveLength(1);
     const w2 = md.writeAnswers(w, "Reflection", [["Went well?", "Changed"]]);
-    expect(md.readAnswers(w2, "Reflection")).toEqual({ "Went well?": "Changed" });
+    // A question that is no longer asked keeps its answer.
+    expect(md.readAnswers(w2, "Reflection")).toEqual({ "Went well?": "Changed", "Next?": "More\nlines" });
     expect(w2.match(/## Reflection/g)).toHaveLength(1);
   });
 
@@ -127,5 +134,80 @@ describe("answers", () => {
     const c = "## Reflection\n\n### Q\nold\n\n## After\nkeep\n";
     const w = md.writeAnswers(c, "Reflection", [["Q", "new"]]);
     expect(w).toBe("## Reflection\n\n### Q\nnew\n\n## After\nkeep\n");
+  });
+
+  it("keeps text written under the heading itself", () => {
+    const c = "## Reflection\n\nMy own paragraph.\n\n### Q\nold\n";
+    const w = md.writeAnswers(c, "Reflection", [["Q", "new"]]);
+    expect(w).toBe("## Reflection\n\nMy own paragraph.\n\n### Q\nnew\n");
+  });
+
+  it("keeps CRLF line endings and leaves other sections byte for byte", () => {
+    const c = "---\r\nx: 1\r\n---\r\n## Notes\r\n\r\n\r\n\r\nkeep\r\n## Reflection\r\n### Q1\r\nold\r\n\r\n## After\r\nend\r\n";
+    const w = md.writeAnswers(c, "Reflection", [["Q1", "new\nline"], ["Q2", "two"]]);
+    expect(w).toBe("---\r\nx: 1\r\n---\r\n## Notes\r\n\r\n\r\n\r\nkeep\r\n## Reflection\r\n\r\n### Q1\r\nnew\r\nline\r\n\r\n### Q2\r\ntwo\r\n\r\n## After\r\nend\r\n");
+    expect(w.replace(/\r\n/g, "")).not.toContain("\n");
+    expect(md.readAnswers(w, "Reflection")).toEqual({ Q1: "new\nline", Q2: "two" });
+  });
+
+  it("appends the section in the note's line endings", () => {
+    expect(md.writeAnswers("# T\r\n", "Reflection", [["Q", "a"]])).toBe("# T\r\n\r\n## Reflection\r\n\r\n### Q\r\na\r\n");
+  });
+});
+
+describe("finding a session line", () => {
+  const C = "## Sessions\n- 09:00–10:00 A · [[Q]]\n- 10:00–11:00 B · [[Q]]\n- 11:00–12:00 C · [[Q]]\n";
+
+  it("uses the remembered line while it still holds the session", () => {
+    const [, b] = md.parseSessions(C, "d");
+    expect(md.findSessionLine(C, b!)).toBe(2);
+  });
+
+  it("finds the session again after an earlier line was deleted", () => {
+    const [a, b] = md.parseSessions(C, "d");
+    const after = md.deleteLine(C, a!.line);
+    // b still remembers line 2, which now holds C.
+    expect(md.findSessionLine(after, b!)).toBe(1);
+    const edited = md.replaceSession(after, "Sessions", md.findSessionLine(after, b!), { start: 600, end: 690, taskText: "B2", quest: "Q", taskId: "" });
+    expect(md.parseSessions(edited, "d").map((s) => s.taskText)).toEqual(["B2", "C"]);
+  });
+
+  it("returns -1 when the session is gone", () => {
+    const [a] = md.parseSessions(C, "d");
+    expect(md.findSessionLine(md.deleteLine(C, a!.line), a!)).toBe(-1);
+  });
+});
+
+describe("section text", () => {
+  const H = ["Closing line", "Tagesfazit"];
+  const DAY = "---\nplan: [a]\n---\n## Sessions\n- 10:30–12:00 Draft · [[Travel book]] 🆔 def456\n";
+
+  it("reads English and German headings", () => {
+    expect(md.readSectionText(`${DAY}\n## Closing line\nFinished it.\n`, H)).toBe("Finished it.");
+    expect(md.readSectionText(`## Tagesfazit\nGeschafft.\n\n## Sessions\n- x\n`, H)).toBe("Geschafft.");
+    expect(md.readSectionText(DAY, H)).toBe("");
+  });
+
+  it("appends a missing section at the end, other bytes untouched", () => {
+    expect(md.writeSectionText(DAY, "Closing line", "Finished it.", H)).toBe(`${DAY}\n## Closing line\nFinished it.\n`);
+    expect(md.writeSectionText("---\nplan: []\n---\n", "Closing line", "One.", H)).toBe("---\nplan: []\n---\n\n## Closing line\nOne.\n");
+  });
+
+  it("replaces in place and keeps a German heading", () => {
+    const de = `## Tagesfazit\nAlt.\n\n## Sessions\n- x\n`;
+    expect(md.writeSectionText(de, "Closing line", "Neu.", H)).toBe(`## Tagesfazit\nNeu.\n\n## Sessions\n- x\n`);
+    const en = `${DAY}\n## Closing line\nOld.\n`;
+    expect(md.writeSectionText(en, "Closing line", "New.", H)).toBe(`${DAY}\n## Closing line\nNew.\n`);
+  });
+
+  it("removes the section on empty text", () => {
+    expect(md.writeSectionText(`${DAY}\n## Closing line\nOld.\n`, "Closing line", "", H)).toBe(DAY);
+    expect(md.writeSectionText(`## Tagesfazit\nAlt.\n\n## Sessions\n- x\n`, "Closing line", " ", H)).toBe(`## Sessions\n- x\n`);
+    expect(md.writeSectionText(DAY, "Closing line", "", H)).toBe(DAY);
+  });
+
+  it("keeps CRLF", () => {
+    const crlf = "## Sessions\r\n- x\r\n\r\n## Closing line\r\nOld.\r\n";
+    expect(md.writeSectionText(crlf, "Closing line", "New.", H)).toBe("## Sessions\r\n- x\r\n\r\n## Closing line\r\nNew.\r\n");
   });
 });

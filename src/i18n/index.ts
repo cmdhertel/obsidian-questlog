@@ -1,6 +1,7 @@
 import { moment } from "obsidian";
 import en from "./en";
 import de from "./de";
+import { formatDate } from "./format";
 
 export type Key = keyof typeof en;
 
@@ -15,6 +16,11 @@ function lang(): string {
 export function t(key: Key, vars?: Record<string, string | number>): string {
   const s = dictionaries[lang()]?.[key] ?? en[key];
   return vars ? s.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? "")) : s;
+}
+
+/** Date text in Obsidian's language, not the operating system's. */
+export function fmtDate(date: Date, opts: Intl.DateTimeFormatOptions): string {
+  return formatDate(date, moment.locale() || "en", opts);
 }
 
 export function weekdayShort(day: Date): string {

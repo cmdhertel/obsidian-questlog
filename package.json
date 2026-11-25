@@ -1,6 +1,6 @@
 {
   "name": "obsidian-questlog",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Focus on one task, measure your time, keep a done list, and reflect weekly — quests in plain Markdown.",
   "main": "main.js",
   "type": "module",
@@ -12,7 +12,8 @@
     "version": "node version-bump.mjs && git add manifest.json versions.json",
     "install:vault": "node scripts/install-vault.mjs",
     "check": "npm run typecheck && npm run lint && npm test",
-    "typecheck": "tsc --noEmit --skipLibCheck"
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "smoke": "node scripts/smoke.mjs"
   },
   "keywords": [
     "obsidian",

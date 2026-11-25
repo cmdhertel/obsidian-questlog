@@ -1,6 +1,8 @@
 // Pure Markdown reading/writing for quest notes, day logs and reviews. No Obsidian imports, so it is unit-testable.
 import { fmtClock, parseClock } from "./dates";
+import { bare, bodyStart, eolOf, splitLines } from "./lines";
 import type { Session, Task } from "./model";
+import { insertAt, parseStages, stageOfLine } from "./stages";
 
 const TASK_RE = /^(\s*)([-*+]) \[(.)\] (.*)$/;
 const ID_RE = /\s*🆔\s*([\w-]+)/;
@@ -11,25 +13,15 @@ export function newId(): string {
   return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
 }
 
-function lines(content: string): string[] {
-  return content.split("\n");
-}
-
-/** Line index where the body starts (after YAML frontmatter). */
-function bodyStart(ls: string[]): number {
-  if (ls[0] !== "---") return 0;
-  for (let i = 1; i < ls.length; i++) if (ls[i] === "---") return i + 1;
-  return 0;
-}
-
 // ---------------------------------------------------------------- tasks
 
 export function parseTasks(content: string, questPath: string): Task[] {
   const out: Task[] = [];
-  const ls = lines(content);
+  const ls = splitLines(content);
+  const stages = parseStages(content);
   let inCode = false;
   for (let i = bodyStart(ls); i < ls.length; i++) {
-    const l = ls[i] ?? "";
+    const l = bare(ls[i] ?? "");
     if (/^\s*(```|~~~)/.test(l)) inCode = !inCode;
     if (inCode) continue;
     const m = TASK_RE.exec(l);
@@ -40,7 +32,8 @@ export function parseTasks(content: string, questPath: string): Task[] {
     const id = ID_RE.exec(rest)?.[1] ?? "";
     const doneDate = DONE_RE.exec(rest)?.[1] ?? null;
     const text = rest.replace(ID_RE, "").replace(DONE_RE, "").replace(/\s*\^[\w-]+\s*$/, "").trim();
-    out.push({ id, text, done: status !== " ", doneDate, line: i, questPath });
+    const st = stageOfLine(stages, i);
+    out.push({ id, text, done: status !== " ", doneDate, line: i, questPath, stage: st ? st.name : null, stageIndex: st ? st.index : null });
   }
   return out;
 }
@@ -58,9 +51,10 @@ export function locateTask(content: string, task: Pick<Task, "id" | "line" | "te
 }
 
 function editLine(content: string, line: number, fn: (l: string) => string): string {
-  const ls = lines(content);
+  const ls = splitLines(content);
   if (line < 0 || line >= ls.length) return content;
-  ls[line] = fn(ls[line] ?? "");
+  const old = ls[line] ?? "";
+  ls[line] = fn(bare(old)) + (old.endsWith("\r") ? "\r" : "");
   return ls.join("\n");
 }
 
@@ -97,7 +91,7 @@ export function isSessionLine(l: string): boolean {
 }
 
 export function deleteLine(content: string, line: number): string {
-  const ls = lines(content);
+  const ls = splitLines(content);
   if (line < 0 || line >= ls.length) return content;
   ls.splice(line, 1);
   return ls.join("\n");
@@ -105,16 +99,17 @@ export function deleteLine(content: string, line: number): string {
 
 /** Insert `newLine` at the end of the section under `heading` (## level), creating the section if missing. */
 export function appendToSection(content: string, heading: string, newLine: string): string {
-  const ls = lines(content);
+  const ls = splitLines(content);
   const start = bodyStart(ls);
+  const eol = eolOf(content);
   const h = ls.findIndex((l, i) => i >= start && l.trim() === `## ${heading}`);
   if (h === -1) {
     const trimmed = content.replace(/\s*$/, "");
-    return `${trimmed}${trimmed ? "\n\n" : ""}## ${heading}\n${newLine}\n`;
+    return `${trimmed}${trimmed ? eol + eol : ""}## ${heading}${eol}${newLine}${eol}`;
   }
   let end = ls.length;
   for (let i = h + 1; i < ls.length; i++) {
-    if (/^#{1,2} /.test(ls[i] ?? "")) {
+    if (/^#{1,2} /.test(bare(ls[i] ?? ""))) {
       end = i;
       break;
     }
@@ -122,7 +117,7 @@ export function appendToSection(content: string, heading: string, newLine: strin
   // insert after the last non-empty line of the section
   let at = end;
   while (at > h + 1 && (ls[at - 1] ?? "").trim() === "") at--;
-  ls.splice(at, 0, newLine);
+  insertAt(ls, at, [newLine], eol);
   return ls.join("\n");
 }
 
@@ -134,7 +129,7 @@ export function taskLine(text: string, id: string): string {
 
 export function parseSessions(content: string, day: string): Session[] {
   const out: Session[] = [];
-  lines(content).forEach((l, i) => {
+  splitLines(content).forEach((l, i) => {
     const m = SESSION_RE.exec(l.trim());
     if (!m) return;
     const start = parseClock(m[1] ?? "");
@@ -156,21 +151,32 @@ export function insertSession(content: string, heading: string, s: Parameters<ty
   const existing = parseSessions(content, "");
   const after = existing.filter((e) => e.start <= s.start).pop();
   if (after) {
-    const ls = lines(content);
-    ls.splice(after.line + 1, 0, sessionLine(s));
+    const ls = splitLines(content);
+    insertAt(ls, after.line + 1, [sessionLine(s)], eolOf(content));
     return ls.join("\n");
   }
   const first = existing[0];
   if (first) {
-    const ls = lines(content);
-    ls.splice(first.line, 0, sessionLine(s));
+    const ls = splitLines(content);
+    insertAt(ls, first.line, [sessionLine(s)], eolOf(content));
     return ls.join("\n");
   }
   return appendToSection(content, heading, sessionLine(s));
 }
 
+/**
+ * The line that holds session `s` now: its remembered line if that still has the same session, otherwise the first
+ * line with the same session (the note changed since it was read, e.g. an earlier line was deleted); -1 if it is gone.
+ */
+export function findSessionLine(content: string, s: Session): number {
+  const same = (x: Session) =>
+    x.start === s.start && x.end === s.end && x.quest === s.quest && x.taskText === s.taskText && x.taskId === s.taskId && x.note === s.note;
+  const all = parseSessions(content, s.day);
+  return (all.find((x) => x.line === s.line && same(x)) ?? all.find(same))?.line ?? -1;
+}
+
 export function replaceSession(content: string, heading: string, line: number, s: Parameters<typeof sessionLine>[0]): string {
-  const ls = lines(content);
+  const ls = splitLines(content);
   if (!SESSION_RE.test((ls[line] ?? "").trim())) return content;
   ls.splice(line, 1);
   return insertSession(ls.join("\n"), heading, s);
@@ -180,7 +186,7 @@ export function replaceSession(content: string, heading: string, line: number, s
 
 /** Read "### question" sub-sections under "## parent" into a map. */
 export function readAnswers(content: string, parent: string): Record<string, string> {
-  const ls = lines(content);
+  const ls = splitLines(content);
   const out: Record<string, string> = {};
   const p = ls.findIndex((l) => l.trim() === `## ${parent}`);
   if (p === -1) return out;
@@ -192,34 +198,119 @@ export function readAnswers(content: string, parent: string): Record<string, str
   for (let i = p + 1; i < ls.length; i++) {
     const l = ls[i] ?? "";
     if (/^#{1,2} /.test(l)) break;
-    const h = /^### (.*)$/.exec(l);
+    const h = /^### (.*)$/.exec(bare(l));
     if (h) {
       flush();
       key = (h[1] ?? "").trim();
       buf = [];
-    } else if (key !== null) buf.push(l);
+    } else if (key !== null) buf.push(bare(l));
   }
   flush();
   return out;
 }
 
-/** Replace the "## parent" section with the given question/answer pairs (in order). */
+/**
+ * Write question/answer pairs (in order) into the "## parent" section. Only that section changes, in the note's own
+ * line endings. Text the user wrote under the heading itself, and questions that are no longer asked, stay.
+ */
 export function writeAnswers(content: string, parent: string, answers: [string, string][]): string {
-  const block = [`## ${parent}`, ""];
-  for (const [q, a] of answers) block.push(`### ${q}`, a.trim(), "");
-  const ls = lines(content);
+  const eol = eolOf(content);
+  const ls = splitLines(content);
   const p = ls.findIndex((l) => l.trim() === `## ${parent}`);
-  if (p === -1) {
-    const trimmed = content.replace(/\s*$/, "");
-    return `${trimmed}${trimmed ? "\n\n" : ""}${block.join("\n").trimEnd()}\n`;
-  }
   let end = ls.length;
-  for (let i = p + 1; i < ls.length; i++) {
-    if (/^#{1,2} /.test(ls[i] ?? "")) {
-      end = i;
-      break;
+  const intro: string[] = [];
+  const old: [string, string[]][] = [];
+  if (p !== -1) {
+    for (let i = p + 1; i < ls.length; i++) {
+      const l = bare(ls[i] ?? "");
+      if (/^#{1,2} /.test(l)) {
+        end = i;
+        break;
+      }
+      const h = /^### (.*)$/.exec(l);
+      if (h) old.push([(h[1] ?? "").trim(), []]);
+      else (old.length ? old[old.length - 1]![1] : intro).push(l);
     }
   }
-  const tail = ls.slice(end);
-  return [...ls.slice(0, p), ...block, ...(tail.length ? tail : [])].join("\n").replace(/\n{3,}/g, "\n\n").replace(/\s*$/, "\n");
+  const block = [`## ${parent}`, ""];
+  const add = (head: string | null, text: string) => {
+    const body = text.trim();
+    if (head !== null) block.push(head);
+    if (body) block.push(...body.split(/\r?\n/));
+    if (head !== null || body) block.push("");
+  };
+  add(null, intro.join("\n"));
+  for (const [q, a] of answers) add(`### ${q}`, a);
+  const asked = new Set(answers.map(([q]) => q.trim()));
+  for (const [q, body] of old) if (!asked.has(q)) add(`### ${q}`, body.join("\n"));
+  while (block.length && block[block.length - 1] === "") block.pop();
+  const text = block.join(eol);
+  if (p === -1) {
+    const trimmed = content.replace(/\s*$/, "");
+    return `${trimmed}${trimmed ? eol + eol : ""}${text}${eol}`;
+  }
+  const head = ls.slice(0, p).join("\n");
+  const tail = ls.slice(end).join("\n");
+  return `${p > 0 ? `${head}\n` : ""}${text}${eol}${end < ls.length ? eol + tail : ""}`;
+}
+
+// ---------------------------------------------------------------- one-paragraph sections (closing line, check-ins)
+
+/** Line of the first "## h" (h any of `headings`) after the frontmatter, or -1. */
+function findSection(ls: string[], headings: string[]): number {
+  const start = bodyStart(ls);
+  const want = new Set(headings.map((h) => `## ${h}`));
+  return ls.findIndex((l, i) => i >= start && want.has(bare(l).trim()));
+}
+
+/** Line after the section that starts at `h`: the next # or ## heading, or the end. */
+function sectionEnd(ls: string[], h: number): number {
+  for (let i = h + 1; i < ls.length; i++) if (/^#{1,2} /.test(bare(ls[i] ?? ""))) return i;
+  return ls.length;
+}
+
+/** Text of the first section under any of `headings`, trimmed; "" when missing. */
+export function readSectionText(content: string, headings: string[]): string {
+  const ls = splitLines(content);
+  const h = findSection(ls, headings);
+  if (h < 0) return "";
+  return ls.slice(h + 1, sectionEnd(ls, h)).map(bare).join("\n").trim();
+}
+
+/**
+ * Set the text of the section under `heading` (or an existing one under any of `also`, which keeps its heading).
+ * Empty text removes the section. A missing section is appended at the end. Other lines stay byte for byte.
+ */
+export function writeSectionText(content: string, heading: string, text: string, also: string[] = []): string {
+  const ls = splitLines(content);
+  const eol = eolOf(content);
+  const h = findSection(ls, [heading, ...also]);
+  const body = text.trim();
+  if (h < 0) {
+    if (!body) return content;
+    const trimmed = content.replace(/\s*$/, "");
+    return `${trimmed}${trimmed ? eol + eol : ""}## ${heading}${eol}${body}${eol}`;
+  }
+  const end = sectionEnd(ls, h);
+  if (!body) {
+    if (end < ls.length) {
+      ls.splice(h, end - h);
+      return ls.join("\n");
+    }
+    const before = ls.slice(0, h).join("\n").replace(/\s*$/, "");
+    return before ? before + eol : "";
+  }
+  const lines = body.split(/\r?\n/).map((l) => (eol === "\r\n" ? `${l}\r` : l));
+  if (end < ls.length) lines.push(eol === "\r\n" ? "\r" : "");
+  else if (content.endsWith("\n")) lines.push("");
+  ls.splice(h + 1, end - h - 1, ...lines);
+  return ls.join("\n");
+}
+
+/** Append `line` to the first section under any of `headings`; a missing section is created as `headings[0]`. */
+export function appendToSectionAny(content: string, headings: string[], line: string): string {
+  const ls = splitLines(content);
+  const h = findSection(ls, headings);
+  const name = h < 0 ? headings[0]! : bare(ls[h]!).trim().slice(3);
+  return appendToSection(content, name, line);
 }
