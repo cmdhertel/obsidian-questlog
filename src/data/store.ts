@@ -135,7 +135,8 @@ export class QuestStore extends Events {
     const kind = this.kind(f.path);
     const fm: Record<string, unknown> = this.app.metadataCache.getFileCache(f)?.frontmatter ?? {};
     const content = await this.app.vault.cachedRead(f);
-    if (kind === "quest") this.quests.push(this.toQuest(f, fm, content));
+    // A reload and a flush can read the same note at once; the later read replaces the earlier one, never adds a twin.
+    if (kind === "quest") this.quests = [...this.quests.filter((q) => q.path !== f.path), this.toQuest(f, fm, content)];
     else if (kind === "vision") this.vision = vis.parseVision(content);
     else if (kind === "other") this.other = { ...this.emptyOther(), tasks: md.parseTasks(content, f.path) };
     else if (kind === "day" && DAY_RE.test(f.basename)) {
@@ -709,7 +710,7 @@ export class QuestStore extends Events {
   async updateSession(old: Session, s: SessionInput): Promise<void> {
     if (old.day === s.day) {
       const f = this.file(this.days.get(old.day)?.path ?? "");
-      await this.app.vault.process(f, (c) => md.replaceSession(c, t("md.sessions"), old.line, s));
+      await this.app.vault.process(f, (c) => md.replaceSession(c, t("md.sessions"), this.sessionLine(c, old), s));
     } else {
       await this.deleteSession(old);
       await this.addSession(s);
@@ -719,10 +720,14 @@ export class QuestStore extends Events {
   async deleteSession(s: Session): Promise<void> {
     const d = this.days.get(s.day);
     if (!d) return;
-    await this.app.vault.process(this.file(d.path), (c) => {
-      const line = c.split("\n")[s.line] ?? "";
-      return md.isSessionLine(line) ? md.deleteLine(c, s.line) : c;
-    });
+    await this.app.vault.process(this.file(d.path), (c) => md.deleteLine(c, this.sessionLine(c, s)));
+  }
+
+  /** Where session `s` is in the note now; the remembered line can be stale right after another edit. */
+  private sessionLine(content: string, s: Session): number {
+    const i = md.findSessionLine(content, s);
+    if (i < 0) throw new Error(t("session.gone"));
+    return i;
   }
 
   /** Not-work time of a day, from its note. */

@@ -331,7 +331,7 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
       e.dataTransfer?.setData(DRAG_TYPE, taskKey(task));
       e.dataTransfer?.setData("text/plain", task.text);
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-      window.setTimeout(() => row.addClass("is-dragging"), 0);
+      row.win.setTimeout(() => row.addClass("is-dragging"), 0);
     };
     row.ondragend = () => row.removeClass("is-dragging");
   }

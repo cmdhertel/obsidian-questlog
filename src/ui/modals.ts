@@ -49,7 +49,7 @@ export class TextModal extends Modal {
       x.inputEl.onkeydown = (e) => {
         if (e.key === "Enter" && !e.isComposing) submit();
       };
-      window.setTimeout(() => x.inputEl.select(), 0);
+      x.inputEl.win.setTimeout(() => x.inputEl.select(), 0);
     });
     new Setting(this.contentEl).addButton((b) => b.setButtonText(t("common.save")).setCta().onClick(submit));
   }
@@ -92,7 +92,7 @@ export class VisionModal extends Modal {
     new Setting(this.contentEl)
       .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))
       .addButton((b) => b.setButtonText(t("common.save")).setCta().onClick(submit));
-    window.setTimeout(() => area.focus(), 0);
+    area.win.setTimeout(() => area.focus(), 0);
   }
   onClose(): void {
     this.contentEl.empty();
@@ -126,7 +126,7 @@ export class QuestModal extends Modal {
     new Setting(this.contentEl).setName(t("quest.name")).addText((x) => {
       x.setPlaceholder(t("quest.namePh")).setValue(v.name).onChange((s) => (v.name = s));
       x.inputEl.addClass("ql-wide");
-      if (!q) window.setTimeout(() => x.inputEl.focus(), 0);
+      if (!q) x.inputEl.win.setTimeout(() => x.inputEl.focus(), 0);
     });
     new Setting(this.contentEl)
       .setName(t("quest.why"))
@@ -308,8 +308,12 @@ export class SessionModal extends Modal {
       }
       buttons.addButton((b) =>
         b.setButtonText(t("common.delete")).setClass("mod-warning").onClick(async () => {
-          await store.deleteSession(ex);
-          this.close();
+          try {
+            await store.deleteSession(ex);
+            this.close();
+          } catch (e) {
+            new Notice(e instanceof Error ? e.message : String(e));
+          }
         }),
       );
     }
@@ -415,7 +419,7 @@ export class StartTimeModal extends Modal {
         e.preventDefault();
         void save().catch((err) => new Notice(err instanceof Error ? err.message : String(err)));
       });
-      window.setTimeout(() => x.inputEl.focus(), 0);
+      x.inputEl.win.setTimeout(() => x.inputEl.focus(), 0);
     });
     hint = this.contentEl.createEl("p", { cls: "ql-muted ql-small ql-start-hint", attr: { "aria-live": "polite" } });
     new Setting(this.contentEl)
@@ -499,7 +503,7 @@ export class StageModal extends Modal {
         x.setPlaceholder(t("stage.namePh")).setValue(name).onChange((s) => (name = s));
         x.inputEl.addClass("ql-wide");
         enter(x.inputEl);
-        window.setTimeout(() => x.inputEl.select(), 0);
+        x.inputEl.win.setTimeout(() => x.inputEl.select(), 0);
       });
     }
     if (o.withTarget) {
@@ -510,7 +514,7 @@ export class StageModal extends Modal {
           x.inputEl.type = "date";
           x.setValue(target).onChange((s) => (target = s));
           enter(x.inputEl);
-          if (o.name === null) window.setTimeout(() => x.inputEl.focus(), 0);
+          if (o.name === null) x.inputEl.win.setTimeout(() => x.inputEl.focus(), 0);
         });
     }
     new Setting(this.contentEl)
@@ -557,7 +561,7 @@ export class ReachStageModal extends Modal {
     buttons.push(loose);
     const cancel = row.createEl("button", { text: t("common.cancel") });
     cancel.onclick = () => this.close();
-    window.setTimeout(() => buttons[0]?.focus(), 0);
+    this.contentEl.win.setTimeout(() => buttons[0]?.focus(), 0);
   }
   onClose(): void {
     if (!this.done) this.opts.onCancel?.();

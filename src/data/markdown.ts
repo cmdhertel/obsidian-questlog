@@ -164,6 +164,17 @@ export function insertSession(content: string, heading: string, s: Parameters<ty
   return appendToSection(content, heading, sessionLine(s));
 }
 
+/**
+ * The line that holds session `s` now: its remembered line if that still has the same session, otherwise the first
+ * line with the same session (the note changed since it was read, e.g. an earlier line was deleted); -1 if it is gone.
+ */
+export function findSessionLine(content: string, s: Session): number {
+  const same = (x: Session) =>
+    x.start === s.start && x.end === s.end && x.quest === s.quest && x.taskText === s.taskText && x.taskId === s.taskId && x.note === s.note;
+  const all = parseSessions(content, s.day);
+  return (all.find((x) => x.line === s.line && same(x)) ?? all.find(same))?.line ?? -1;
+}
+
 export function replaceSession(content: string, heading: string, line: number, s: Parameters<typeof sessionLine>[0]): string {
   const ls = splitLines(content);
   if (!SESSION_RE.test((ls[line] ?? "").trim())) return content;
@@ -192,31 +203,55 @@ export function readAnswers(content: string, parent: string): Record<string, str
       flush();
       key = (h[1] ?? "").trim();
       buf = [];
-    } else if (key !== null) buf.push(l);
+    } else if (key !== null) buf.push(bare(l));
   }
   flush();
   return out;
 }
 
-/** Replace the "## parent" section with the given question/answer pairs (in order). */
+/**
+ * Write question/answer pairs (in order) into the "## parent" section. Only that section changes, in the note's own
+ * line endings. Text the user wrote under the heading itself, and questions that are no longer asked, stay.
+ */
 export function writeAnswers(content: string, parent: string, answers: [string, string][]): string {
-  const block = [`## ${parent}`, ""];
-  for (const [q, a] of answers) block.push(`### ${q}`, a.trim(), "");
+  const eol = eolOf(content);
   const ls = splitLines(content);
   const p = ls.findIndex((l) => l.trim() === `## ${parent}`);
-  if (p === -1) {
-    const trimmed = content.replace(/\s*$/, "");
-    return `${trimmed}${trimmed ? "\n\n" : ""}${block.join("\n").trimEnd()}\n`;
-  }
   let end = ls.length;
-  for (let i = p + 1; i < ls.length; i++) {
-    if (/^#{1,2} /.test(ls[i] ?? "")) {
-      end = i;
-      break;
+  const intro: string[] = [];
+  const old: [string, string[]][] = [];
+  if (p !== -1) {
+    for (let i = p + 1; i < ls.length; i++) {
+      const l = bare(ls[i] ?? "");
+      if (/^#{1,2} /.test(l)) {
+        end = i;
+        break;
+      }
+      const h = /^### (.*)$/.exec(l);
+      if (h) old.push([(h[1] ?? "").trim(), []]);
+      else (old.length ? old[old.length - 1]![1] : intro).push(l);
     }
   }
-  const tail = ls.slice(end);
-  return [...ls.slice(0, p), ...block, ...(tail.length ? tail : [])].join("\n").replace(/\n{3,}/g, "\n\n").replace(/\s*$/, "\n");
+  const block = [`## ${parent}`, ""];
+  const add = (head: string | null, text: string) => {
+    const body = text.trim();
+    if (head !== null) block.push(head);
+    if (body) block.push(...body.split(/\r?\n/));
+    if (head !== null || body) block.push("");
+  };
+  add(null, intro.join("\n"));
+  for (const [q, a] of answers) add(`### ${q}`, a);
+  const asked = new Set(answers.map(([q]) => q.trim()));
+  for (const [q, body] of old) if (!asked.has(q)) add(`### ${q}`, body.join("\n"));
+  while (block.length && block[block.length - 1] === "") block.pop();
+  const text = block.join(eol);
+  if (p === -1) {
+    const trimmed = content.replace(/\s*$/, "");
+    return `${trimmed}${trimmed ? eol + eol : ""}${text}${eol}`;
+  }
+  const head = ls.slice(0, p).join("\n");
+  const tail = ls.slice(end).join("\n");
+  return `${p > 0 ? `${head}\n` : ""}${text}${eol}${end < ls.length ? eol + tail : ""}`;
 }
 
 // ---------------------------------------------------------------- one-paragraph sections (closing line, check-ins)

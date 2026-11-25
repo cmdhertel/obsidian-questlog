@@ -122,12 +122,12 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
       state.focusNote = note.value;
       return;
     }
-    window.clearTimeout(pending);
-    pending = window.setTimeout(() => void plugin.timer.setNote(note.value), 400);
+    note.win.clearTimeout(pending);
+    pending = note.win.setTimeout(() => void plugin.timer.setNote(note.value), 400);
   };
   note.onblur = () => {
     if (running) {
-      window.clearTimeout(pending);
+      note.win.clearTimeout(pending);
       void plugin.timer.setNote(note.value);
     }
   };

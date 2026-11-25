@@ -125,7 +125,8 @@ describe("answers", () => {
     expect(md.readAnswers(w, "Reflection")).toEqual({ "Went well?": "Lots", "Next?": "More\nlines" });
     expect(md.parseSessions(w, "d")).toHaveLength(1);
     const w2 = md.writeAnswers(w, "Reflection", [["Went well?", "Changed"]]);
-    expect(md.readAnswers(w2, "Reflection")).toEqual({ "Went well?": "Changed" });
+    // A question that is no longer asked keeps its answer.
+    expect(md.readAnswers(w2, "Reflection")).toEqual({ "Went well?": "Changed", "Next?": "More\nlines" });
     expect(w2.match(/## Reflection/g)).toHaveLength(1);
   });
 
@@ -133,6 +134,47 @@ describe("answers", () => {
     const c = "## Reflection\n\n### Q\nold\n\n## After\nkeep\n";
     const w = md.writeAnswers(c, "Reflection", [["Q", "new"]]);
     expect(w).toBe("## Reflection\n\n### Q\nnew\n\n## After\nkeep\n");
+  });
+
+  it("keeps text written under the heading itself", () => {
+    const c = "## Reflection\n\nMy own paragraph.\n\n### Q\nold\n";
+    const w = md.writeAnswers(c, "Reflection", [["Q", "new"]]);
+    expect(w).toBe("## Reflection\n\nMy own paragraph.\n\n### Q\nnew\n");
+  });
+
+  it("keeps CRLF line endings and leaves other sections byte for byte", () => {
+    const c = "---\r\nx: 1\r\n---\r\n## Notes\r\n\r\n\r\n\r\nkeep\r\n## Reflection\r\n### Q1\r\nold\r\n\r\n## After\r\nend\r\n";
+    const w = md.writeAnswers(c, "Reflection", [["Q1", "new\nline"], ["Q2", "two"]]);
+    expect(w).toBe("---\r\nx: 1\r\n---\r\n## Notes\r\n\r\n\r\n\r\nkeep\r\n## Reflection\r\n\r\n### Q1\r\nnew\r\nline\r\n\r\n### Q2\r\ntwo\r\n\r\n## After\r\nend\r\n");
+    expect(w.replace(/\r\n/g, "")).not.toContain("\n");
+    expect(md.readAnswers(w, "Reflection")).toEqual({ Q1: "new\nline", Q2: "two" });
+  });
+
+  it("appends the section in the note's line endings", () => {
+    expect(md.writeAnswers("# T\r\n", "Reflection", [["Q", "a"]])).toBe("# T\r\n\r\n## Reflection\r\n\r\n### Q\r\na\r\n");
+  });
+});
+
+describe("finding a session line", () => {
+  const C = "## Sessions\n- 09:00–10:00 A · [[Q]]\n- 10:00–11:00 B · [[Q]]\n- 11:00–12:00 C · [[Q]]\n";
+
+  it("uses the remembered line while it still holds the session", () => {
+    const [, b] = md.parseSessions(C, "d");
+    expect(md.findSessionLine(C, b!)).toBe(2);
+  });
+
+  it("finds the session again after an earlier line was deleted", () => {
+    const [a, b] = md.parseSessions(C, "d");
+    const after = md.deleteLine(C, a!.line);
+    // b still remembers line 2, which now holds C.
+    expect(md.findSessionLine(after, b!)).toBe(1);
+    const edited = md.replaceSession(after, "Sessions", md.findSessionLine(after, b!), { start: 600, end: 690, taskText: "B2", quest: "Q", taskId: "" });
+    expect(md.parseSessions(edited, "d").map((s) => s.taskText)).toEqual(["B2", "C"]);
+  });
+
+  it("returns -1 when the session is gone", () => {
+    const [a] = md.parseSessions(C, "d");
+    expect(md.findSessionLine(md.deleteLine(C, a!.line), a!)).toBe(-1);
   });
 });
 

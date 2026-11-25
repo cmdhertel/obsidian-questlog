@@ -85,6 +85,7 @@ export class QuestlogView extends ItemView {
   /** Below the scrolling body: the phone capture bar (#28). */
   private footEl!: HTMLElement;
   private deferred = false;
+  private closed = false;
   state: UiState;
   width: Width = "wide";
 
@@ -125,6 +126,7 @@ export class QuestlogView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.closed = false;
     const root = this.contentEl;
     root.empty();
     root.addClass("questlog");
@@ -134,8 +136,8 @@ export class QuestlogView extends ItemView {
     this.footEl = root.createDiv({ cls: "ql-foot" });
     // Don't re-render under the user's cursor; catch up when they leave the field.
     this.registerDomEvent(root, "focusout", () => {
-      window.setTimeout(() => {
-        if (this.deferred && !this.isEditing()) this.refresh();
+      root.win.setTimeout(() => {
+        if (!this.closed && this.deferred && !this.isEditing()) this.refresh();
       }, 50);
     });
     // Leaving fullscreen (Esc in the browser, window controls) also leaves zen mode.
@@ -185,6 +187,8 @@ export class QuestlogView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.closed = true;
+    this.deferred = false;
     if (this.contentEl.doc.fullscreenElement === this.contentEl) void this.contentEl.doc.exitFullscreen().catch(() => undefined);
     this.contentEl.empty();
   }
@@ -206,6 +210,11 @@ export class QuestlogView extends ItemView {
 
   /** Open a ritual card on Home, whatever the time and dismissals (commands and the ritual line). */
   openRitual(r: Omit<OpenRitual, "step">): void {
+    // Drafts belong to one card: another ritual, day or quest must not inherit them (e.g. yesterday's sentence).
+    const was = this.state.ritual;
+    if (!was || was.id !== r.id || was.day !== r.day || was.quest !== r.quest) {
+      for (const k of [...this.state.drafts.keys()]) if (k.startsWith("ritual:")) this.state.drafts.delete(k);
+    }
     this.state.ritual = { ...r, step: 0 };
     this.state.ritualNote = null;
     this.showTab("home");

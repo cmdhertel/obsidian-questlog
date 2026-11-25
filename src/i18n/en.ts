@@ -386,6 +386,7 @@ const en = {
   "session.task": "Task",
   "session.noTask": "— no specific task —",
   "session.continue": "Continue this work",
+  "session.gone": "This time entry changed in the meantime. Open it again to edit it.",
 
   "review.title": "Weekly review",
   "review.thisWeek": "This week",

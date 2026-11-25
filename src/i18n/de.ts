@@ -388,6 +388,7 @@ const de: Record<keyof typeof en, string> = {
   "session.task": "Aufgabe",
   "session.noTask": "– keine bestimmte Aufgabe –",
   "session.continue": "Diese Arbeit fortsetzen",
+  "session.gone": "Dieser Zeiteintrag hat sich inzwischen geändert. Öffne ihn erneut, um ihn zu bearbeiten.",
 
   "review.title": "Wochenrückblick",
   "review.thisWeek": "Diese Woche",
