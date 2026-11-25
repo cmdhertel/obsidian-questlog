@@ -1,9 +1,11 @@
 import { Menu, Notice, setIcon, setTooltip } from "obsidian";
 import type { Quest, Task } from "../data/model";
 import { addDays, fmtDuration, parseDay } from "../data/dates";
+import type { ContinueTarget } from "../data/lastwork";
 import type { Position } from "../data/plan";
 import { t } from "../i18n";
 import type { Ctx } from "./ctx";
+import { workTitle } from "../data/timerlog";
 import { ConfirmModal, TextModal } from "./modals";
 
 const DRAG_TYPE = "application/x-questlog-task";
@@ -26,6 +28,45 @@ export function iconButton(parent: HTMLElement, icon: string, label: string, onC
     e.stopPropagation();
     onClick();
   };
+  return b;
+}
+
+export interface PlayOpts {
+  /** Text button ("Start" / "Pause") instead of an icon button. */
+  text?: boolean;
+  /** Pause instead of play; defaults to "the timer runs exactly this target". */
+  running?: boolean;
+  cls?: string;
+}
+
+/** Name of the work a target stands for, used in the button's label. */
+function targetName(target: ContinueTarget): string {
+  return target.kind === "task" ? target.task.text : target.kind === "quest" ? questName(target.quest) : "";
+}
+
+/**
+ * Play or pause for a piece of work, by the live timer state. Play starts the target, pause stops
+ * and logs. Returns null for kind "none" (nothing to start). Views re-render on every timer change,
+ * so the icon never goes stale.
+ */
+export function playButton(parent: HTMLElement, ctx: Ctx, target: ContinueTarget, opts: PlayOpts = {}): HTMLButtonElement | null {
+  if (target.kind === "none") return null;
+  const timer = ctx.plugin.timer;
+  const running = opts.running ?? timer.isRunningTarget(target);
+  const work = targetName(target);
+  const label = t(running ? "timer.pauseWork" : "timer.startWork", { work });
+  const run = act(() => (running ? timer.stop() : timer.startTarget(target)));
+  const cls = `ql-play${running ? " is-live" : ""} ${opts.cls ?? ""}`.trim();
+  let b: HTMLButtonElement;
+  if (opts.text) {
+    b = button(parent, t(running ? "timer.pause" : "timer.start"), run, { icon: running ? "pause" : "play", cls });
+    setTooltip(b, label);
+  } else {
+    b = iconButton(parent, running ? "pause" : "play", label, run, cls);
+  }
+  b.setAttr("aria-label", label);
+  // Enter/Space on the button must not reach a parent that is itself a keyboard button (quest card).
+  b.onkeydown = (e) => e.stopPropagation();
   return b;
 }
 
@@ -162,11 +203,14 @@ export function timerBar(parent: HTMLElement, ctx: Ctx): void {
   el.createSpan({ cls: "ql-live-dot" });
   liveClock(el, c.start, c.box ?? 0);
   const txt = el.createDiv({ cls: "ql-timerbar-text" });
-  txt.createSpan({ cls: "ql-timerbar-task", text: c.taskText });
-  txt.createSpan({ cls: "ql-muted", text: ` · ${questName(q, c.quest)}` });
+  const qname = questName(q, c.quest);
+  const title = workTitle(c.taskText, qname);
+  txt.createSpan({ cls: "ql-timerbar-task", text: title });
+  // A quest-only run already shows the quest as its title.
+  if (title !== qname) txt.createSpan({ cls: "ql-muted", text: ` · ${qname}` });
   el.onclick = () => ctx.view.showTab("focus");
   iconButton(el, "pause", t("timer.pause"), act(() => ctx.plugin.timer.stop()));
-  iconButton(el, "check", t("task.complete"), act(() => ctx.plugin.completeCurrent()));
+  if (c.taskId) iconButton(el, "check", t("task.complete"), act(() => ctx.plugin.completeCurrent()));
 }
 
 // ---------------------------------------------------------------- tasks
@@ -230,9 +274,8 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
   }
 
   const actions = row.createDiv({ cls: "ql-task-actions" });
-  if (!task.done) {
-    if (running) iconButton(actions, "pause", t("timer.pause"), act(() => plugin.timer.stop()), "is-live");
-    else iconButton(actions, "play", t("timer.start"), act(() => plugin.timer.start(task)));
+  if (!task.done && quest && (running || store.isWorkable(quest))) {
+    playButton(actions, ctx, { kind: "task", task, quest }, { cls: "ql-task-play" });
   }
   iconButton(actions, "more-horizontal", t("task.more"), () => {}).onclick = (e) => {
     e.stopPropagation();

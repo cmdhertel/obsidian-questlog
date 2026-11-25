@@ -1,7 +1,9 @@
 import { App, FuzzySuggestModal, Modal, Notice, Setting, setIcon, setTooltip } from "obsidian";
 import type QuestlogPlugin from "../main";
 import type { Quest, Session, Task } from "../data/model";
-import { fmtClock, isoDay, parseClock } from "../data/dates";
+import { fmtClock, isoDay, minutesOfDay, parseClock } from "../data/dates";
+import { clampToday, midnightOf, minuteToMs, type StartClamp } from "../data/startearlier";
+import { resolveContinueSession } from "../data/lastwork";
 import { PALETTE } from "../data/store";
 import { t } from "../i18n";
 
@@ -228,6 +230,16 @@ export class SessionModal extends Modal {
     const buttons = new Setting(this.contentEl);
     if (this.existing) {
       const ex = this.existing;
+      // Starts the logged work again; the dialog's own edits are not saved, it just closes.
+      const target = resolveContinueSession(ex, store);
+      if (target.kind !== "none" && !this.plugin.timer.isRunningTarget(target)) {
+        buttons.addButton((b) =>
+          b.setButtonText(t("session.continue")).onClick(() => {
+            this.close();
+            this.plugin.timer.startTarget(target).catch((e: unknown) => new Notice(e instanceof Error ? e.message : String(e)));
+          }),
+        );
+      }
       buttons.addButton((b) =>
         b.setButtonText(t("common.delete")).setClass("mod-warning").onClick(async () => {
           await store.deleteSession(ex);
@@ -268,6 +280,79 @@ export class SessionModal extends Modal {
   }
 }
 
+/** "Change start" of the running timer: a time field for today, clamped to what is already logged. */
+export class StartTimeModal extends Modal {
+  constructor(private plugin: QuestlogPlugin) {
+    super(plugin.app);
+  }
+
+  /** One line that says which limit moved the start; nothing for an unclamped start. */
+  static announce(clamped: StartClamp, start: number): void {
+    if (clamped === "none") return;
+    new Notice(t(`focus.clamped.${clamped}`, { time: fmtClock(minutesOfDay(new Date(start))) }));
+  }
+
+  /** Clamp a "HH:MM" text against today's sessions; null for empty or invalid input. */
+  private resolve(text: string, runStart: number): { start: number; clamped: StartClamp } | null {
+    const min = parseClock(text);
+    if (min === null || min >= 1440) return null;
+    const now = Date.now();
+    const today = isoDay(new Date(now));
+    const sessions = this.plugin.store.sessions([today]);
+    return clampToday(minuteToMs(midnightOf(now), min), now, sessions, runStart);
+  }
+
+  onOpen(): void {
+    const run = this.plugin.settings.timer;
+    if (!run) return this.close();
+    const runStart = run.start;
+    this.setTitle(t("focus.changeStart"));
+    const initial = fmtClock(minutesOfDay(new Date(runStart)));
+    let value = initial;
+    let hint: HTMLElement | undefined;
+    const showHint = () => {
+      const r = this.resolve(value, runStart);
+      const key = r && r.clamped !== "none" ? (`focus.clamped.${r.clamped}` as const) : null;
+      hint?.setText(key && r ? t(key, { time: fmtClock(minutesOfDay(new Date(r.start))) }) : "");
+    };
+    const save = async () => {
+      // Untouched field: keep the exact start instead of rounding it to the minute.
+      if (value === initial) return this.close();
+      const r = this.resolve(value, runStart);
+      if (!r) return void new Notice(t("err.startTime"));
+      this.close();
+      // The run may have been stopped or replaced while the dialog was open (sync, status bar).
+      if (this.plugin.settings.timer?.start !== runStart) return;
+      await this.plugin.timer.setStart(r.start);
+      StartTimeModal.announce(r.clamped, r.start);
+    };
+    new Setting(this.contentEl).setName(t("focus.startedAt")).addText((x) => {
+      x.inputEl.type = "time";
+      x.setValue(value).onChange((s) => {
+        value = s;
+        showHint();
+      });
+      x.inputEl.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        void save().catch((err) => new Notice(err instanceof Error ? err.message : String(err)));
+      });
+      window.setTimeout(() => x.inputEl.focus(), 0);
+    });
+    hint = this.contentEl.createEl("p", { cls: "ql-muted ql-small ql-start-hint", attr: { "aria-live": "polite" } });
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))
+      .addButton((b) =>
+        b.setButtonText(t("common.save")).setCta().onClick(() => {
+          void save().catch((err) => new Notice(err instanceof Error ? err.message : String(err)));
+        }),
+      );
+  }
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
 /** Fuzzy picker over all open tasks of active quests. */
 export class TaskSuggestModal extends FuzzySuggestModal<Task> {
   constructor(private plugin: QuestlogPlugin, private onPick: (task: Task) => void) {
@@ -286,46 +371,5 @@ export class TaskSuggestModal extends FuzzySuggestModal<Task> {
   }
   onChooseItem(task: Task): void {
     this.onPick(task);
-  }
-}
-
-/** Command palette: quickly capture a task into a quest or Other. */
-export class AddTaskModal extends Modal {
-  constructor(private plugin: QuestlogPlugin) {
-    super(plugin.app);
-  }
-  onOpen(): void {
-    const store = this.plugin.store;
-    this.setTitle(t("task.add"));
-    const quests = store.workable();
-    const v = { quest: store.other.path, text: "", today: true };
-    const submit = async () => {
-      const q = quests.find((x) => x.path === v.quest);
-      if (!q || !v.text.trim()) return;
-      try {
-        await store.addTaskTo(q, v.text.trim(), v.today ? isoDay(new Date()) : null, "bottom");
-        this.close();
-      } catch (e) {
-        new Notice(e instanceof Error ? e.message : String(e));
-      }
-    };
-    new Setting(this.contentEl).setName(t("session.task")).addText((x) => {
-      x.inputEl.addClass("ql-wide");
-      x.setPlaceholder(t("task.addPlaceholder"));
-      x.onChange((s) => (v.text = s));
-      x.inputEl.onkeydown = (e) => {
-        if (e.key === "Enter" && !e.isComposing) void submit();
-      };
-      window.setTimeout(() => x.inputEl.focus(), 0);
-    });
-    new Setting(this.contentEl).setName(t("session.quest")).addDropdown((d) => {
-      for (const q of quests) d.addOption(q.path, q.kind === "other" ? t("other.name") : q.name);
-      d.setValue(v.quest).onChange((s) => (v.quest = s));
-    });
-    new Setting(this.contentEl).setName(t("plan.addToday")).addToggle((x) => x.setValue(v.today).onChange((b) => (v.today = b)));
-    new Setting(this.contentEl).addButton((b) => b.setButtonText(t("task.add")).setCta().onClick(() => void submit()));
-  }
-  onClose(): void {
-    this.contentEl.empty();
   }
 }

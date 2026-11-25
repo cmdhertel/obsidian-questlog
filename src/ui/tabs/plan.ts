@@ -3,7 +3,7 @@
 import { addDays, fmtHours, isoWeek, parseDay, weekDays } from "../../data/dates";
 import { totalMinutes } from "../../data/stats";
 import { weeklyTargetHours } from "../../settings";
-import { t, weekdayShort } from "../../i18n";
+import { fmtDate, t, weekdayShort } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { addTaskField, button, dropTarget, empty, iconButton, pageHead, questIcon, questName, taskRow } from "../components";
 
@@ -62,7 +62,7 @@ export function renderPlan(el: HTMLElement, ctx: Ctx): void {
     const h = col.createDiv({ cls: "ql-col-head" });
     const d = parseDay(day);
     h.createSpan({ cls: "ql-col-title", text: day === today ? t("nav.today") : weekdayShort(d) });
-    h.createSpan({ cls: "ql-col-date", text: d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) });
+    h.createSpan({ cls: "ql-col-date", text: fmtDate(d, { day: "numeric", month: "short" }) });
     const min = totalMinutes(sessions.filter((s) => s.day === day));
     if (min) h.createSpan({ cls: "ql-col-meta ql-mono", text: fmtHours(min) });
 

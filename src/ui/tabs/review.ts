@@ -6,7 +6,7 @@ import { minutesByQuest, totalMinutes } from "../../data/stats";
 import type { Quest, Session } from "../../data/model";
 import { OTHER_COLOR } from "../../data/store";
 import { weeklyQuestions, weeklyTargetHours } from "../../settings";
-import { t, weekdayShort } from "../../i18n";
+import { fmtDate, t, weekdayShort } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { act, bar, button, dot, empty, iconButton, pageHead, questName, sectionHead, statCard } from "../components";
 
@@ -22,7 +22,7 @@ export function renderReview(el: HTMLElement, ctx: Ctx): void {
   const target = weeklyTargetHours(plugin.settings, store.quests);
   const activeDays = days.filter((d) => d <= today && sessions.some((s) => s.day === d)).length;
 
-  const range = `${parseDay(days[0]!).toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${parseDay(days[6]!).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+  const range = `${fmtDate(parseDay(days[0]!), { day: "numeric", month: "short" })} – ${fmtDate(parseDay(days[6]!), { day: "numeric", month: "short" })}`;
   const actions = pageHead(el, t("review.title"), `${t("common.week")} ${week.replace(/^\d{4}-W0?/, "")} · ${range}`);
   const nav = actions.createDiv({ cls: "ql-navgroup" });
   iconButton(nav, "chevron-left", t("nav.prevWeek"), () => {
@@ -150,7 +150,7 @@ export function renderReview(el: HTMLElement, ctx: Ctx): void {
   for (const day of [...days].reverse()) {
     const items = done.filter((x) => x.doneDate === day);
     if (!items.length) continue;
-    dl.createDiv({ cls: "ql-donelog-day", text: parseDay(day).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" }) });
+    dl.createDiv({ cls: "ql-donelog-day", text: fmtDate(parseDay(day), { weekday: "long", day: "numeric", month: "short" }) });
     for (const task of items) {
       const r = dl.createDiv({ cls: "ql-donelog-item" });
       const q = store.questOf(task);

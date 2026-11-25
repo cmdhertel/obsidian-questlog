@@ -4,7 +4,7 @@ import { fmtHours, parseDay, weekDays } from "../../data/dates";
 import { totalMinutes } from "../../data/stats";
 import type { Task } from "../../data/model";
 import { weeklyTargetHours } from "../../settings";
-import { t } from "../../i18n";
+import { fmtDate, t } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { QuestModal } from "../modals";
 import { addTaskField, button, dropTarget, empty, pageHead, questIcon, questName, sectionHead, taskRow } from "../components";
@@ -16,7 +16,7 @@ export function renderHome(el: HTMLElement, ctx: Ctx): void {
   const weekQuestMin = totalMinutes(store.sessions(weekDays(today)).filter((s) => store.isQuestWork(s.quest)));
   const target = weeklyTargetHours(plugin.settings, store.quests);
 
-  const head = pageHead(el, parseDay(today).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }));
+  const head = pageHead(el, fmtDate(parseDay(today), { weekday: "long", day: "numeric", month: "long" }));
   const stats = head.createDiv({ cls: "ql-headstats" });
   headStat(stats, fmtHours(todayMin), t("home.today"));
   headStat(stats, target ? `${fmtHours(weekQuestMin)} / ${target}h` : fmtHours(weekQuestMin), t("home.week"));

@@ -1,11 +1,14 @@
-import { Notice, Plugin, type WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
 import type { Task } from "./data/model";
+import type { StartOpts } from "./timer";
 import { QuestStore } from "./data/store";
 import { fmtElapsed, isoDay } from "./data/dates";
-import { DEFAULT_SETTINGS, QuestlogSettingTab, type QuestlogSettings, type TabId } from "./settings";
+import { DEFAULT_SETTINGS, QuestlogSettingTab, mergeSettings, type QuestlogSettings, type TabId } from "./settings";
 import { Timer } from "./timer";
+import { workTitle } from "./data/timerlog";
+import { act, questName } from "./ui/components";
 import { QuestlogView, VIEW_TYPE } from "./ui/view";
-import { AddTaskModal, TaskSuggestModal } from "./ui/modals";
+import { StartBox, continueTitle } from "./ui/startbox";
 import { t } from "./i18n";
 
 export default class QuestlogPlugin extends Plugin {
@@ -13,19 +16,28 @@ export default class QuestlogPlugin extends Plugin {
   store!: QuestStore;
   timer!: Timer;
   private statusEl: HTMLElement | null = null;
+  /** What the status bar item currently shows, so tick() only touches the DOM when that changes. */
+  private statusKey = "";
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.store = new QuestStore(this.app, () => this.settings);
+    this.store = new QuestStore(this.app, () => this.settings, () => this.saveSettings());
     this.timer = new Timer(this);
 
     this.registerView(VIEW_TYPE, (leaf) => new QuestlogView(leaf, this));
     this.addSettingTab(new QuestlogSettingTab(this.app, this));
     this.addRibbonIcon("target", "Questlog", () => void this.openView());
+    this.addRibbonIcon("play", t("cmd.continueLast"), act(() => this.continueLast()));
 
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("ql-statusbar");
-    this.registerDomEvent(this.statusEl, "click", () => void this.openView("focus"));
+    this.registerDomEvent(this.statusEl, "click", () => this.onStatusActivate());
+    this.registerDomEvent(this.statusEl, "keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && this.statusEl?.getAttr("role") === "button") {
+        e.preventDefault();
+        this.onStatusActivate();
+      }
+    });
     this.registerInterval(window.setInterval(() => this.tick(), 1000));
 
     this.registerCommands();
@@ -54,26 +66,24 @@ export default class QuestlogPlugin extends Plugin {
     this.addCommand({
       id: "toggle-timer",
       name: t("cmd.toggleTimer"),
-      callback: async () => {
+      callback: act(async () => {
         if (this.timer.current) await this.timer.stop();
         else {
           const next = this.store.dayTasks(this.today())[0];
           if (next) await this.timer.start(next);
-          else new TaskSuggestModal(this, (task) => void this.timer.start(task)).open();
+          else await this.continueLast();
         }
-      },
+      }),
     });
-    this.addCommand({
-      id: "start-task",
-      name: t("cmd.startTask"),
-      callback: () => new TaskSuggestModal(this, (task) => void this.timer.start(task)).open(),
-    });
+    this.addCommand({ id: "quick-start", name: t("cmd.quickStart"), callback: () => new StartBox(this, "start").open() });
+    this.addCommand({ id: "start-task", name: t("cmd.startTask"), callback: () => new StartBox(this, "start").open() });
+    this.addCommand({ id: "continue-last", name: t("cmd.continueLast"), callback: act(() => this.continueLast()) });
     this.addCommand({
       id: "complete-current",
       name: t("cmd.completeCurrent"),
       checkCallback: (checking) => {
         const c = this.settings.timer;
-        if (!c) return false;
+        if (!c?.taskId) return false;
         if (!checking) void this.completeCurrent();
         return true;
       },
@@ -81,7 +91,7 @@ export default class QuestlogPlugin extends Plugin {
     this.addCommand({
       id: "add-task",
       name: t("cmd.addTask"),
-      callback: () => new AddTaskModal(this).open(),
+      callback: () => new StartBox(this, "add").open(),
     });
     this.addCommand({
       id: "zen-mode",
@@ -94,6 +104,14 @@ export default class QuestlogPlugin extends Plugin {
         if (view instanceof QuestlogView) view.setZen(on);
       },
     });
+  }
+
+  /** Resume the last work; opens the Start box when there is nothing to resume. */
+  async continueLast(opts: StartOpts = {}): Promise<void> {
+    const target = this.timer.continueTarget();
+    if (this.timer.isRunningTarget(target)) new Notice(t("notice.alreadyRunning"));
+    else if (target.kind === "none") new StartBox(this, "start").open();
+    else await this.timer.startTarget(target, opts);
   }
 
   today(): string {
@@ -136,12 +154,7 @@ export default class QuestlogPlugin extends Plugin {
   }
 
   private tick(): void {
-    const c = this.settings.timer;
-    if (this.statusEl) {
-      this.statusEl.toggleClass("is-running", !!c);
-      this.statusEl.setText(c ? `⏱ ${clockText(c.start, c.box ?? 0)} · ${c.taskText}` : "");
-      this.statusEl.setAttr("aria-label", c ? t("status.open") : "");
-    }
+    this.updateStatus();
     // Live clocks: elapsed time, or the remaining time of a time box (data-box, minutes).
     // Looked up per view, so clocks in pop-out windows keep running too.
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
@@ -154,10 +167,51 @@ export default class QuestlogPlugin extends Plugin {
     this.timer.checkBox();
   }
 
+  private onStatusActivate(): void {
+    if (this.settings.timer) void this.openView("focus");
+    else if (this.statusEl?.getAttr("role") === "button") act(() => this.continueLast())();
+  }
+
+  /** Running: clock and title. Idle with something to continue: a play icon. Otherwise empty. */
+  private updateStatus(): void {
+    const el = this.statusEl;
+    if (!el) return;
+    const c = this.settings.timer;
+    const target = c ? null : this.timer.continueTarget();
+    const title = target ? continueTitle(target) : "";
+    const text = c ? `⏱ ${clockText(c.start, c.box ?? 0)} · ${workTitle(c.taskText, questName(this.store.quest(c.quest), c.quest))}` : "";
+    const key = c ? `run|${text}` : title ? `idle|${title}` : "";
+    if (key === this.statusKey) return;
+    this.statusKey = key;
+    if (!c && !title) {
+      el.empty();
+      el.removeClass("is-running", "is-continue");
+      for (const a of ["role", "tabindex", "aria-label", "data-tooltip-position"]) el.removeAttribute(a);
+      return;
+    }
+    if (c) {
+      el.addClass("is-running");
+      el.removeAttribute("data-tooltip-position");
+      el.removeClass("is-continue");
+      el.setText(text);
+      el.setAttr("aria-label", t("status.open"));
+    } else {
+      const label = t("status.continue", { title });
+      el.empty();
+      el.removeClass("is-running");
+      el.addClass("is-continue");
+      setIcon(el.createSpan({ cls: "ql-status-icon" }), "play");
+      el.setAttr("aria-label", label);
+      setTooltip(el, label, { placement: "top" });
+    }
+    el.setAttr("role", "button");
+    el.setAttr("tabindex", "0");
+  }
+
   async loadSettings(): Promise<void> {
     const data = ((await this.loadData()) ?? {}) as Partial<QuestlogSettings> & { dailyQuestions?: unknown };
     delete data.dailyQuestions; // removed in 0.2
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    this.settings = mergeSettings(DEFAULT_SETTINGS, data);
   }
 
   /** data.json was changed by sync: take over the new settings and timer instead of overwriting them. */

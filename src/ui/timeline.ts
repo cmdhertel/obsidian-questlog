@@ -3,10 +3,12 @@
 import { fmtClock, fmtDuration, minutesOfDay, parseDay } from "../data/dates";
 import { dur, layoutLanes, totalMinutes } from "../data/stats";
 import type { Session } from "../data/model";
+import { workTitle } from "../data/timerlog";
 import { weekdayShort } from "../i18n";
 import type { Ctx } from "./ctx";
 import { SessionModal } from "./modals";
-import { questName } from "./components";
+import { resolveContinueSession } from "../data/lastwork";
+import { playButton, questName } from "./components";
 
 export interface TimelineOpts {
   hourPx?: number;
@@ -71,7 +73,7 @@ export function renderTimeline(el: HTMLElement, ctx: Ctx, days: string[], opts: 
     };
 
     for (const { session, lane, lanes } of layoutLanes(sessions.filter((s) => s.day === day))) {
-      block(col, ctx, session, y(session.start), y(session.end), lane, lanes, () => new SessionModal(plugin, session, session).open());
+      block(col, ctx, session, y(session.start), y(session.end), lane, lanes, () => new SessionModal(plugin, session, session).open(), true);
     }
 
     if (running && day === today) {
@@ -80,7 +82,7 @@ export function renderTimeline(el: HTMLElement, ctx: Ctx, days: string[], opts: 
         day, start, end: Math.max(start + 1, now),
         taskText: running.taskText, quest: running.quest, taskId: running.taskId, note: "", line: -1,
       };
-      block(col, ctx, live, y(live.start), y(live.end), 0, 1, () => ctx.view.showTab("focus")).addClass("is-live");
+      block(col, ctx, live, y(live.start), y(live.end), 0, 1, () => ctx.view.showTab("focus"), false).addClass("is-live");
     }
 
     if (day === today && now >= from * 60 && now <= to * 60) col.createDiv({ cls: "ql-cal-now" }).style.top = `${y(now)}px`;
@@ -88,18 +90,31 @@ export function renderTimeline(el: HTMLElement, ctx: Ctx, days: string[], opts: 
   return cal;
 }
 
-function block(col: HTMLElement, ctx: Ctx, s: Session, top: number, bottom: number, lane: number, lanes: number, onClick: () => void): HTMLElement {
+function block(col: HTMLElement, ctx: Ctx, s: Session, top: number, bottom: number, lane: number, lanes: number, onClick: () => void, canPlay: boolean): HTMLElement {
   const q = ctx.store.quest(s.quest);
   const name = questName(q, s.quest);
   const b = col.createDiv({ cls: "ql-cal-block" + (q?.kind === "other" ? " is-other" : "") });
   b.style.setProperty("--ql-color", q?.color ?? "var(--text-faint)");
   b.style.top = `${top}px`;
-  b.style.height = `${Math.max(14, bottom - top - 2)}px`;
+  const height = Math.max(14, bottom - top - 2);
+  b.style.height = `${height}px`;
   b.style.left = `calc(${(lane / lanes) * 100}% + 2px)`;
   b.style.width = `calc(${100 / lanes}% - 4px)`;
-  b.setAttr("aria-label", `${fmtClock(s.start)}–${fmtClock(s.end)} · ${s.taskText} · ${name} (${fmtDuration(dur(s))})${s.note ? `\n${s.note}` : ""}`);
-  b.createDiv({ cls: "ql-cal-block-title", text: s.taskText });
-  if (bottom - top > 30) b.createDiv({ cls: "ql-cal-block-meta", text: `${fmtClock(s.start)}–${fmtClock(s.end)} · ${name}` });
+  const title = workTitle(s.taskText, name);
+  // Without a task the title is already the quest name: show it once.
+  const where = title === name ? "" : ` · ${name}`;
+  b.setAttr("aria-label", `${fmtClock(s.start)}–${fmtClock(s.end)} · ${title}${where} (${fmtDuration(dur(s))})${s.note ? `\n${s.note}` : ""}`);
+  b.createDiv({ cls: "ql-cal-block-title", text: title });
+  if (bottom - top > 30) b.createDiv({ cls: "ql-cal-block-meta", text: `${fmtClock(s.start)}–${fmtClock(s.end)}${where}` });
+  // Short blocks get no icon (the edit dialog has "Continue this work"); narrow lanes hide it in CSS.
+  if (canPlay && height >= 40) {
+    const play = playButton(b, ctx, resolveContinueSession(s, ctx.store), { cls: "ql-cal-block-play" });
+    if (play) {
+      b.addClass("has-play");
+      // Keep the block's own edit click and any pointer handling of the grid away from the button.
+      play.onpointerdown = (e) => e.stopPropagation();
+    }
+  }
   b.onclick = (e) => {
     e.stopPropagation();
     onClick();

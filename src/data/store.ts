@@ -25,7 +25,7 @@ export class QuestStore extends Events {
   private pending = new Set<string>();
   private timer: number | null = null;
 
-  constructor(private app: App, private settings: () => QuestlogSettings) {
+  constructor(private app: App, private settings: () => QuestlogSettings, private saveSettings: () => Promise<void> = async () => {}) {
     super();
     this.other = this.emptyOther();
   }
@@ -171,6 +171,9 @@ export class QuestStore extends Events {
   /** Quests that accept work: active ones plus the Other inbox. */
   workable(): Quest[] {
     return [...this.activeQuests(), this.other];
+  }
+  isWorkable(quest: Quest): boolean {
+    return quest.kind === "other" || quest.status === "active";
   }
   allTasks(): Task[] {
     return [...this.quests, this.other].flatMap((q) => q.tasks);
@@ -324,8 +327,12 @@ export class QuestStore extends Events {
       // we update the session links ourselves as well so renames never orphan logged time.
       await this.app.fileManager.renameFile(f, target);
       await this.renameQuestInLogs(quest.name, newName);
-      const timer = this.settings().timer;
-      if (timer?.quest === quest.name) timer.quest = newName;
+      // Keep the running timer and the remembered last work on the new name, and save them even when no timer runs.
+      const { timer, lastWork } = this.settings();
+      let changed = false;
+      if (timer?.quest === quest.name) [timer.quest, changed] = [newName, true];
+      if (lastWork?.quest === quest.name) [lastWork.quest, changed] = [newName, true];
+      if (changed) await this.saveSettings();
     }
   }
 

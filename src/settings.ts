@@ -1,7 +1,10 @@
-import { App, PluginSettingTab, Setting, normalizePath } from "obsidian";
+import { App, PluginSettingTab, Setting, normalizePath, type SettingDefinition, type SettingDefinitionItem } from "obsidian";
 import type QuestlogPlugin from "./main";
-import type { Quest, RunningTimer } from "./data/model";
-import { t } from "./i18n";
+import type { LastWork, Quest, RunningTimer } from "./data/model";
+import { mergeSettings } from "./data/settings-merge";
+import { t, type Key } from "./i18n";
+
+export { mergeSettings };
 
 export type TabId = "home" | "plan" | "calendar" | "focus" | "quests" | "review";
 
@@ -21,6 +24,13 @@ export interface QuestlogSettings {
   reviewDay: number;
   timer: RunningTimer | null;
   lastTab: TabId;
+  /** Last day (YYYY-MM-DD) or week the start, close, week and check-in rituals were dismissed. */
+  rituals: { start: string | null; close: string | null; week: string | null; checkin: string | null };
+  /** Weeks of data the goal check-in looks at. */
+  checkinWeeks: number;
+  /** Idle minutes before the nudge appears. 0 = off. */
+  nudgeMinutes: number;
+  lastWork: LastWork | null;
 }
 
 export const DEFAULT_SETTINGS: QuestlogSettings = {
@@ -35,6 +45,10 @@ export const DEFAULT_SETTINGS: QuestlogSettings = {
   reviewDay: 0,
   timer: null,
   lastTab: "home",
+  rituals: { start: null, close: null, week: null, checkin: null },
+  checkinWeeks: 3,
+  nudgeMinutes: 15,
+  lastWork: null,
 };
 
 export const TIME_BOXES = [0, 25, 50, 90];
@@ -47,111 +61,165 @@ export function weeklyQuestions(s: QuestlogSettings): string[] {
 
 const linesOf = (v: string): string[] => v.split("\n").map((l) => l.trim()).filter(Boolean);
 
+/** One settings row as plain data; only the two render paths below know how it is shown. */
+interface Row {
+  name: string;
+  desc?: string;
+  aliases: string;
+  build: (setting: Setting) => void;
+}
+interface Section {
+  heading?: string;
+  rows: Row[];
+}
+
 export class QuestlogSettingTab extends PluginSettingTab {
   constructor(app: App, private plugin: QuestlogPlugin) {
     super(app, plugin);
   }
 
+  /** Obsidian 1.13+: declarative rows, so they show up in settings search. */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    const toDef = (r: Row): SettingDefinition => ({
+      name: r.name,
+      desc: r.desc,
+      aliases: r.aliases.split(",").map((a) => a.trim()).filter(Boolean),
+      render: (setting) => r.build(setting),
+    });
+    return this.sections().flatMap((sec): SettingDefinitionItem[] =>
+      sec.heading ? [{ type: "group", heading: sec.heading, items: sec.rows.map(toDef) }] : sec.rows.map(toDef),
+    );
+  }
+
+  /** Older Obsidian: Obsidian only calls this when getSettingDefinitions() is empty. */
   display(): void {
     const { containerEl } = this;
-    const s = this.plugin.settings;
-    const save = async () => {
-      await this.plugin.saveSettings();
-    };
     containerEl.empty();
+    for (const sec of this.sections()) {
+      if (sec.heading) new Setting(containerEl).setName(sec.heading).setHeading();
+      for (const r of sec.rows) r.build(new Setting(containerEl));
+    }
+  }
 
-    new Setting(containerEl)
-      .setName(t("set.folder"))
-      .setDesc(t("set.folderDesc"))
-      .addText((x) =>
-        x.setPlaceholder("Questlog").setValue(s.folder).onChange(async (v) => {
-          s.folder = normalizePath(v.trim() || "Questlog");
-          await save();
-          await this.plugin.store.reload();
+  /** The single list both render paths use, so they cannot drift. */
+  private sections(): Section[] {
+    // Obsidian keeps the definitions and settings can be replaced by sync, so rows always look up the current object.
+    const { plugin } = this;
+    const save = async () => {
+      await plugin.saveSettings();
+    };
+    const row = (name: string, aliasKey: Key, desc: string | undefined, build: (x: Setting) => void): Row => ({
+      name,
+      desc,
+      aliases: t(aliasKey),
+      build: (x) => {
+        x.setName(name);
+        if (desc) x.setDesc(desc);
+        build(x);
+      },
+    });
+    const hour = (name: string, aliasKey: Key, key: "calendarStartHour" | "calendarEndHour") =>
+      row(name, aliasKey, undefined, (x) =>
+        x.addDropdown((d) => {
+          for (let h = 0; h <= 24; h++) d.addOption(String(h), `${String(h).padStart(2, "0")}:00`);
+          d.setValue(String(plugin.settings[key])).onChange(async (v) => {
+            plugin.settings[key] = Number(v);
+            if (plugin.settings.calendarEndHour <= plugin.settings.calendarStartHour) plugin.settings.calendarEndHour = Math.min(24, plugin.settings.calendarStartHour + 1);
+            await save();
+            plugin.refreshViews();
+          });
         }),
       );
 
-    new Setting(containerEl)
-      .setName(t("set.vision"))
-      .setDesc(t("set.visionDesc"))
-      .addTextArea((x) =>
-        x.setValue(s.vision).onChange(async (v) => {
-          s.vision = v;
-          await save();
-          this.plugin.refreshViews();
-        }),
-      );
-
-    new Setting(containerEl).setName(t("set.calendar")).setHeading();
-    const hour = (name: string, key: "calendarStartHour" | "calendarEndHour") =>
-      new Setting(containerEl).setName(name).addDropdown((d) => {
-        for (let h = 0; h <= 24; h++) d.addOption(String(h), `${String(h).padStart(2, "0")}:00`);
-        d.setValue(String(s[key])).onChange(async (v) => {
-          s[key] = Number(v);
-          if (s.calendarEndHour <= s.calendarStartHour) s.calendarEndHour = Math.min(24, s.calendarStartHour + 1);
-          await save();
-          this.plugin.refreshViews();
-        });
-      });
-    hour(t("set.calStart"), "calendarStartHour");
-    hour(t("set.calEnd"), "calendarEndHour");
-
-    new Setting(containerEl)
-      .setName(t("set.minSession"))
-      .setDesc(t("set.minSessionDesc"))
-      .addSlider((x) =>
-        x.setLimits(0, 10, 1).setDynamicTooltip().setValue(s.minSessionMinutes).onChange(async (v) => {
-          s.minSessionMinutes = v;
-          await save();
-        }),
-      );
-
-    new Setting(containerEl).setName(t("set.focus")).setHeading();
-    new Setting(containerEl)
-      .setName(t("set.target"))
-      .setDesc(t("set.targetDesc"))
-      .addText((x) => {
-        x.inputEl.type = "number";
-        x.inputEl.min = "0";
-        x.inputEl.step = "1";
-        x.setValue(String(s.weeklyTarget)).onChange(async (v) => {
-          s.weeklyTarget = Math.max(0, Number(v) || 0);
-          await save();
-          this.plugin.refreshViews();
-        });
-      });
-    new Setting(containerEl)
-      .setName(t("set.box"))
-      .setDesc(t("set.boxDesc"))
-      .addDropdown((d) => {
-        for (const m of TIME_BOXES) d.addOption(String(m), m ? t("focus.boxMin", { n: m }) : t("focus.boxFree"));
-        d.setValue(String(s.pomodoroMinutes)).onChange(async (v) => {
-          s.pomodoroMinutes = Number(v);
-          await save();
-        });
-      });
-
-    new Setting(containerEl).setName(t("set.reflection")).setHeading();
-    new Setting(containerEl)
-      .setName(t("set.reviewDay"))
-      .addDropdown((d) => {
-        for (let i = 0; i < 7; i++) d.addOption(String(i), t(`wd.long.${i}` as "wd.long.0"));
-        d.setValue(String(s.reviewDay)).onChange(async (v) => {
-          s.reviewDay = Number(v);
-          await save();
-          this.plugin.refreshViews();
-        });
-      });
-    new Setting(containerEl)
-      .setName(t("set.weeklyQ"))
-      .setDesc(t("set.questionsDesc"))
-      .addTextArea((x) => {
-        x.inputEl.rows = 5;
-        x.setValue(weeklyQuestions(s).join("\n")).onChange(async (v) => {
-          s.weeklyQuestions = linesOf(v);
-          await save();
-        });
-      });
+    return [
+      {
+        rows: [
+          row(t("set.folder"), "set.alias.folder", t("set.folderDesc"), (x) =>
+            x.addText((c) =>
+              c.setPlaceholder("Questlog").setValue(plugin.settings.folder).onChange(async (v) => {
+                plugin.settings.folder = normalizePath(v.trim() || "Questlog");
+                await save();
+                await plugin.store.reload();
+              }),
+            ),
+          ),
+          row(t("set.vision"), "set.alias.vision", t("set.visionDesc"), (x) =>
+            x.addTextArea((c) =>
+              c.setValue(plugin.settings.vision).onChange(async (v) => {
+                plugin.settings.vision = v;
+                await save();
+                plugin.refreshViews();
+              }),
+            ),
+          ),
+        ],
+      },
+      {
+        heading: t("set.calendar"),
+        rows: [
+          hour(t("set.calStart"), "set.alias.calStart", "calendarStartHour"),
+          hour(t("set.calEnd"), "set.alias.calEnd", "calendarEndHour"),
+          row(t("set.minSession"), "set.alias.minSession", t("set.minSessionDesc"), (x) =>
+            x.addSlider((c) =>
+              c.setLimits(0, 10, 1).setValue(plugin.settings.minSessionMinutes).onChange(async (v) => {
+                plugin.settings.minSessionMinutes = v;
+                await save();
+              }),
+            ),
+          ),
+        ],
+      },
+      {
+        heading: t("set.focus"),
+        rows: [
+          row(t("set.target"), "set.alias.target", t("set.targetDesc"), (x) =>
+            x.addText((c) => {
+              c.inputEl.type = "number";
+              c.inputEl.min = "0";
+              c.inputEl.step = "1";
+              c.setValue(String(plugin.settings.weeklyTarget)).onChange(async (v) => {
+                plugin.settings.weeklyTarget = Math.max(0, Number(v) || 0);
+                await save();
+                plugin.refreshViews();
+              });
+            }),
+          ),
+          row(t("set.box"), "set.alias.box", t("set.boxDesc"), (x) =>
+            x.addDropdown((d) => {
+              for (const m of TIME_BOXES) d.addOption(String(m), m ? t("focus.boxMin", { n: m }) : t("focus.boxFree"));
+              d.setValue(String(plugin.settings.pomodoroMinutes)).onChange(async (v) => {
+                plugin.settings.pomodoroMinutes = Number(v);
+                await save();
+              });
+            }),
+          ),
+        ],
+      },
+      {
+        heading: t("set.reflection"),
+        rows: [
+          row(t("set.reviewDay"), "set.alias.reviewDay", undefined, (x) =>
+            x.addDropdown((d) => {
+              for (let i = 0; i < 7; i++) d.addOption(String(i), t(`wd.long.${i}` as "wd.long.0"));
+              d.setValue(String(plugin.settings.reviewDay)).onChange(async (v) => {
+                plugin.settings.reviewDay = Number(v);
+                await save();
+                plugin.refreshViews();
+              });
+            }),
+          ),
+          row(t("set.weeklyQ"), "set.alias.weeklyQ", t("set.questionsDesc"), (x) =>
+            x.addTextArea((c) => {
+              c.inputEl.rows = 5;
+              c.setValue(weeklyQuestions(plugin.settings).join("\n")).onChange(async (v) => {
+                plugin.settings.weeklyQuestions = linesOf(v);
+                await save();
+              });
+            }),
+          ),
+        ],
+      },
+    ];
   }
 }
 

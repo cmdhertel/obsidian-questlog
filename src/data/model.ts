@@ -60,6 +60,7 @@ export interface Review {
 }
 
 export interface RunningTimer {
+  /** Empty for a run on the quest itself, without a task (taskText is empty then, too). */
   taskId: string;
   taskText: string;
   quest: string;
@@ -69,4 +70,11 @@ export interface RunningTimer {
   box?: number;
   /** Session note, written to the session line when the timer stops. */
   note?: string;
+}
+
+/** The last started work, kept in plugin data so it can be resumed. A quest-only run has an empty taskId and taskText. */
+export interface LastWork {
+  taskId: string;
+  taskText: string;
+  quest: string;
 }

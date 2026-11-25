@@ -3,7 +3,7 @@
 import { addDays, fmtHours, isoWeek, minutesOfDay, parseDay, weekDays } from "../../data/dates";
 import { totalMinutes } from "../../data/stats";
 import { weeklyTargetHours } from "../../settings";
-import { t } from "../../i18n";
+import { fmtDate, t } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { SessionModal } from "../modals";
 import { button, iconButton, pageHead } from "../components";
@@ -20,9 +20,9 @@ export function renderCalendar(el: HTMLElement, ctx: Ctx): void {
 
   const first = parseDay(week[0]!);
   const last = parseDay(week[6]!);
-  const fmt = (d: Date) => d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const fmt = (d: Date) => fmtDate(d, { day: "numeric", month: "short" });
   const title = single
-    ? parseDay(state.calendarDay).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })
+    ? fmtDate(parseDay(state.calendarDay), { weekday: "long", day: "numeric", month: "long" })
     : `${fmt(first)} – ${fmt(last)}`;
   const actions = pageHead(el, title, `${t("common.week")} ${isoWeek(week[0]!).replace(/^\d{4}-W0?/, "")} · ${target ? t("cal.ofTarget", { h: fmtHours(questMin), target: `${target}h` }) : fmtHours(questMin)}`);
 

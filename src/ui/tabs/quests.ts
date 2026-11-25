@@ -3,10 +3,11 @@ import { setIcon } from "obsidian";
 import { fmtHours, parseDay, weekDays } from "../../data/dates";
 import { minutesByQuest, totalMinutes } from "../../data/stats";
 import type { Quest, QuestStatus } from "../../data/model";
-import { t } from "../../i18n";
+import { fmtDate, t } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { QuestModal } from "../modals";
-import { act, addTaskField, bar, button, empty, iconButton, pageHead, pill, questIcon, sectionHead, segmented, statCard, taskRow } from "../components";
+import type { ContinueTarget } from "../../data/lastwork";
+import { act, addTaskField, bar, button, empty, iconButton, pageHead, pill, playButton, questIcon, sectionHead, segmented, statCard, taskRow } from "../components";
 
 export function renderQuests(el: HTMLElement, ctx: Ctx): void {
   const { store, state } = ctx;
@@ -55,6 +56,11 @@ export function renderQuests(el: HTMLElement, ctx: Ctx): void {
   }
 }
 
+/** Play on a quest starts it without a task; only active quests offer it. */
+function questTarget(ctx: Ctx, q: Quest): ContinueTarget {
+  return ctx.store.isWorkable(q) ? { kind: "quest", quest: q } : { kind: "none" };
+}
+
 function card(parent: HTMLElement, ctx: Ctx, q: Quest, weekMin: number, allMin: number): void {
   const c = parent.createDiv({ cls: "ql-qcard" + (q.status === "paused" ? " is-paused" : ""), attr: { role: "button", tabindex: "0" } });
   c.style.setProperty("--ql-color", q.color);
@@ -63,6 +69,7 @@ function card(parent: HTMLElement, ctx: Ctx, q: Quest, weekMin: number, allMin: 
   const title = head.createDiv({ cls: "ql-qcard-title" });
   title.createDiv({ cls: "ql-qcard-name", text: q.name });
   if (q.status === "paused") pill(title, t("quests.paused"), { cls: "is-muted" });
+  playButton(head, ctx, questTarget(ctx, q), { running: ctx.plugin.timer.isRunningForQuest(q.name), cls: "ql-qcard-play" });
   c.createDiv({ cls: "ql-qcard-why" + (q.why ? "" : " is-missing"), text: q.why || t("quest.noWhy") });
 
   const openTasks = q.tasks.filter((x) => !x.done).length;
@@ -108,6 +115,7 @@ function renderDetail(el: HTMLElement, ctx: Ctx, q: Quest): void {
   titles.createDiv({ cls: "ql-qcard-why" + (q.why ? "" : " is-missing"), text: q.why || t("quest.noWhy") });
 
   const actions = head.createDiv({ cls: "ql-page-actions" });
+  playButton(actions, ctx, questTarget(ctx, q), { text: true, running: plugin.timer.isRunningForQuest(q.name), cls: "mod-cta" });
   iconButton(actions, "pencil", t("quest.edit"), () => new QuestModal(plugin, q).open());
   iconButton(actions, "file-text", t("task.openNote"), () => void plugin.app.workspace.openLinkText(q.path, "", false));
   if (q.status === "active") {
@@ -169,5 +177,5 @@ function renderDetail(el: HTMLElement, ctx: Ctx, q: Quest): void {
 function dayHint(day: string, today: string): string {
   if (day === today) return t("nav.today");
   const d = parseDay(day);
-  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  return fmtDate(d, { weekday: "short", day: "numeric", month: "short" });
 }

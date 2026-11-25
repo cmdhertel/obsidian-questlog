@@ -145,7 +145,7 @@
 .ql-btn-plain { background: transparent !important; box-shadow: none !important; padding: 4px 6px; color: var(--text-muted); }
 .ql-btn-plain:hover { color: var(--text-normal); }
 .ql-icon-btn { padding: 4px; }
-.ql-icon-btn.is-live { color: var(--color-red); }
+.ql-icon-btn.is-live { color: var(--ql-color, var(--text-accent)); }
 .ql-btn-done:hover { color: var(--color-green); }
 
 .ql-bar {
@@ -350,10 +350,12 @@
 .ql-task-quest { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-ui-smaller); color: var(--text-muted); }
 .ql-task-quest .ql-dot { width: 6px; height: 6px; }
 .ql-task-hint { color: var(--text-faint); font-style: italic; }
-.ql-task-actions { display: flex; align-items: center; opacity: 0; transition: opacity 0.1s; }
-.ql-task:hover .ql-task-actions,
-.ql-task.is-running .ql-task-actions,
-.ql-task:focus-within .ql-task-actions { opacity: 1; }
+/* Always visible: nothing is hover-only. The "more" menu is just quieter until hovered. */
+.ql-task-actions { display: flex; align-items: center; }
+.ql-task-actions .ql-icon-btn:not(.ql-play) { opacity: 0.45; transition: opacity 0.1s; }
+.ql-task:hover .ql-task-actions .ql-icon-btn,
+.ql-task.is-running .ql-task-actions .ql-icon-btn,
+.ql-task:focus-within .ql-task-actions .ql-icon-btn { opacity: 1; }
 .ql-task-actions .ql-icon-btn svg { width: 15px; height: 15px; }
 .ql-task.is-compact .ql-task-actions .ql-icon-btn { padding: 3px; }
 
@@ -461,6 +463,13 @@
 .ql-chip-btn:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 .ql-chip-btn.is-active { background: color-mix(in srgb, var(--ql-color) 18%, transparent); border-color: color-mix(in srgb, var(--ql-color) 50%, transparent); color: var(--text-normal); }
 
+.ql-start-earlier { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.ql-start-earlier .ql-chips { flex-wrap: wrap; }
+.ql-start-hint { min-height: 1.4em; }
+@media (hover: none) {
+  .ql-start-earlier .ql-chip-btn { min-height: 44px; padding: 4px 14px; }
+  .ql-focus-actions .ql-btn, .ql-focus-more .ql-btn { min-height: 44px; }
+}
 .ql-focus-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
 .ql-focus-actions .ql-btn { padding: 8px 20px; height: auto; font-size: var(--font-ui-medium); }
 .ql-focus-more { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; }
@@ -591,6 +600,26 @@
 .ql-cal-block.is-other { background: var(--background-secondary); border-left-style: dashed; }
 .ql-cal-block.is-live { background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ql-color) 22%, var(--background-primary)) 0 6px, color-mix(in srgb, var(--ql-color) 12%, var(--background-primary)) 6px 12px); }
 .ql-cal-block-title { font-weight: var(--font-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The room for the icon is padding of the texts, not of the block: a container cannot query itself,
+   and the query measures the content box. */
+.ql-cal-block { container-type: inline-size; }
+.ql-cal-block-play { position: absolute; top: 2px; right: 2px; padding: 3px; color: var(--ql-color); }
+.ql-cal-block-play svg { width: 14px; height: 14px; }
+.ql-cal-block.has-play > .ql-cal-block-title,
+.ql-cal-block.has-play > .ql-cal-block-meta { padding-right: 20px; }
+/* Touch: a full-height 44px-wide strip at the block's right edge (the block clips, so no overhang). */
+@media (hover: none) {
+  .ql-cal-block-play.ql-play { top: 0; right: 0; bottom: 0; width: 44px; height: auto; min-height: 0; }
+  .ql-cal-block.has-play > .ql-cal-block-title,
+  .ql-cal-block.has-play > .ql-cal-block-meta { padding-right: 42px; }
+}
+/* Lane too narrow: no icon, the texts keep their room. */
+@container (max-width: 79px) {
+  .ql-cal-block-play.ql-play { display: none; }
+  .ql-cal-block.has-play > .ql-cal-block-title,
+  .ql-cal-block.has-play > .ql-cal-block-meta { padding-right: 0; }
+}
+.ql-qcard-play { flex: none; color: var(--ql-color); }
 .ql-cal-block-meta { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ql-cal-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--color-red); pointer-events: none; z-index: 2; }
 .ql-cal-now::before { content: ""; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-red); }
@@ -697,12 +726,13 @@
 /* ---------------------------------------------------------------- touch: no hover-only controls */
 
 @media (hover: none) {
-  .ql-task-actions { opacity: 1; }
+  .ql-task .ql-task-actions .ql-icon-btn { opacity: 1; }
   .ql-icon-btn { padding: 6px; }
+  .ql-icon-btn.ql-play { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
   .ql-task { min-height: 44px; }
   .ql-task.is-compact { min-height: 40px; }
 }
-.is-mobile .ql-task-actions { opacity: 1; }
+.is-mobile .ql-task .ql-task-actions .ql-icon-btn { opacity: 1; }
 
 /* ── Zen mode: only the task and the clock ── */
 .questlog.is-zen { background: var(--background-primary); }
@@ -739,3 +769,15 @@
 .ql-zen-controls:hover, .ql-zen-controls:focus-within { opacity: 1; }
 .ql-zen-controls .ql-icon-btn { --icon-size: var(--icon-l); padding: var(--size-4-2); }
 @media (hover: none) { .ql-zen-controls { opacity: 0.7; } }
+
+/* Start box and Continue (#5, #7) */
+.ql-sb-row { display: flex; align-items: center; gap: var(--size-4-2); }
+.ql-sb-icon { display: flex; flex: none; color: var(--ql-color, var(--text-muted)); }
+.ql-sb-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ql-sb-quest { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.ql-sb-row.is-start, .ql-sb-row.is-add { font-weight: var(--font-medium); }
+.ql-btn-continue { max-width: 100%; }
+.ql-btn-continue span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ql-statusbar.is-continue { display: inline-flex; align-items: center; }
+.ql-statusbar[role="button"]:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: -2px; }
+@media (hover: none) { .ql-sb-row { min-height: 44px; } }

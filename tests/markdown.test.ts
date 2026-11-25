@@ -94,6 +94,12 @@ plan: []
     expect(md.parseSessions(early, "d")[0]!.taskText).toBe("Early");
   });
 
+  it("round-trips a session without a task text as a dash", () => {
+    const line = md.sessionLine({ start: 540, end: 580, taskText: "", quest: "Travel book", taskId: "" });
+    expect(line).toBe("- 09:00–09:40 — · [[Travel book]]");
+    expect(md.parseSessions(line, "d")[0]).toMatchObject({ start: 540, end: 580, taskText: "—", taskId: "", quest: "Travel book" });
+  });
+
   it("round-trips a session note and keeps it out of the link", () => {
     const line = md.sessionLine({ start: 555, end: 605, taskText: "Draft", quest: "Q", taskId: "abc123", note: "intro\n  done — mostly" });
     expect(line).toBe("- 09:15–10:05 Draft · [[Q]] 🆔 abc123 — intro done — mostly");
