@@ -45,6 +45,8 @@ const de: Record<keyof typeof en, string> = {
   "startbox.empty": "Tippe, um eine Aufgabe zu finden oder eine neue zu starten.",
   "startbox.start": "„{text}“ starten in {quest}",
   "startbox.addOnly": "Nur hinzufügen zu {quest}",
+  "startbox.addBacklog": "Zum Backlog von {quest} hinzufügen",
+  "startbox.addedBacklog": "Zum Backlog von {quest} hinzugefügt",
   "startbox.hintStart": "starten",
   "startbox.hintAdd": "nur hinzufügen",
   "startbox.hintClose": "schließen",

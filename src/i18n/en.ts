@@ -43,6 +43,8 @@ const en = {
   "startbox.empty": "Type to find a task or to start a new one.",
   "startbox.start": "Start “{text}” in {quest}",
   "startbox.addOnly": "Add only to {quest}",
+  "startbox.addBacklog": "Add to backlog of {quest}",
+  "startbox.addedBacklog": "Added to backlog of {quest}",
   "startbox.hintStart": "start",
   "startbox.hintAdd": "add only",
   "startbox.hintClose": "close",

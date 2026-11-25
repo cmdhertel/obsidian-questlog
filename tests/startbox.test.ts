@@ -127,8 +127,14 @@ describe("buildRows", () => {
     expect(r[0]).toMatchObject({ quest: trade });
   });
   it("puts add first in add mode", () => {
-    expect(kinds(buildRows({ ...base, mode: "add", input: "brand new" }))).toEqual(["add", "start"]);
+    expect(kinds(buildRows({ ...base, mode: "add", input: "brand new" }))).toEqual(["add", "backlog", "start"]);
     expect(kinds(buildRows({ ...base, mode: "add", input: "x #travel" }))[0]).toBe("add");
+    // matching tasks never come before the add row
+    expect(kinds(buildRows({ ...base, mode: "add", input: "draft" }))).toEqual(["add", "backlog", "start", "task", "task", "task"]);
+  });
+  it("offers the backlog row only in add mode", () => {
+    expect(kinds(buildRows({ ...base, input: "brand new" }))).not.toContain("backlog");
+    expect(buildRows({ ...base, mode: "add", input: "x #travel" })[1]).toMatchObject({ kind: "backlog", quest: travel, text: "x" });
   });
   it("has no create rows for empty text", () => {
     expect(kinds(buildRows({ ...base, input: "#travel" }))).toEqual(["task", "task"]);

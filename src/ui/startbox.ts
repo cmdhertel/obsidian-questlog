@@ -71,11 +71,12 @@ export class StartBox extends SuggestModal<StartRow> {
   renderSuggestion(row: StartRow, el: HTMLElement): void {
     el.addClass("ql-sb-row", `is-${row.kind}`);
     el.style.setProperty("--ql-color", row.quest.color);
-    setIcon(el.createSpan({ cls: "ql-sb-icon" }), row.kind === "start" ? "play" : row.kind === "add" ? "plus" : "circle");
+    setIcon(el.createSpan({ cls: "ql-sb-icon" }), row.kind === "start" ? "play" : row.kind === "add" ? "plus" : row.kind === "backlog" ? "inbox" : "circle");
     const body = el.createDiv({ cls: "ql-sb-text" });
     const quest = questName(row.quest);
     if (row.kind === "start") body.setText(t("startbox.start", { text: row.text, quest }));
     else if (row.kind === "add") body.setText(t("startbox.addOnly", { quest }));
+    else if (row.kind === "backlog") body.setText(t("startbox.addBacklog", { quest }));
     else {
       body.createSpan({ cls: "ql-sb-title", text: row.task.text });
       body.createSpan({ cls: "ql-sb-quest", text: ` · ${quest}` });
@@ -105,6 +106,11 @@ export class StartBox extends SuggestModal<StartRow> {
       const addOnly = shift || this.mode === "add";
       await this.planToday(row.task, addOnly ? "bottom" : "top");
       if (!addOnly) await timer.start(row.task);
+      return;
+    }
+    if (row.kind === "backlog") {
+      await store.addTaskTo(row.quest, row.text, null, "bottom");
+      new Notice(t("startbox.addedBacklog", { quest: questName(row.quest) }));
       return;
     }
     const addOnly = row.kind === "add" || shift;

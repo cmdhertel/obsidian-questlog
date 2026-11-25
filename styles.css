@@ -613,8 +613,9 @@
   .ql-cal-block.has-play > .ql-cal-block-title,
   .ql-cal-block.has-play > .ql-cal-block-meta { padding-right: 42px; }
 }
-/* Lane too narrow: no icon, the texts keep their room. */
-@container (max-width: 79px) {
+/* Lane too narrow (block under 90px wide): no icon, the texts keep their room. The query measures the content
+   box, which is the block width minus 10px padding and 3px border, so 89px of block is 76px here. */
+@container (max-width: 76px) {
   .ql-cal-block-play.ql-play { display: none; }
   .ql-cal-block.has-play > .ql-cal-block-title,
   .ql-cal-block.has-play > .ql-cal-block-meta { padding-right: 0; }
@@ -775,7 +776,7 @@
 .ql-sb-icon { display: flex; flex: none; color: var(--ql-color, var(--text-muted)); }
 .ql-sb-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ql-sb-quest { color: var(--text-muted); font-size: var(--font-ui-smaller); }
-.ql-sb-row.is-start, .ql-sb-row.is-add { font-weight: var(--font-medium); }
+.ql-sb-row.is-start, .ql-sb-row.is-add, .ql-sb-row.is-backlog { font-weight: var(--font-medium); }
 .ql-btn-continue { max-width: 100%; }
 .ql-btn-continue span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ql-statusbar.is-continue { display: inline-flex; align-items: center; }

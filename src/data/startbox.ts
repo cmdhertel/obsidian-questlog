@@ -19,6 +19,7 @@ export interface TaskEntry {
 export type StartRow =
   | { kind: "start"; text: string; quest: Quest }
   | { kind: "add"; text: string; quest: Quest }
+  | { kind: "backlog"; text: string; quest: Quest }
   | { kind: "task"; task: Task; quest: Quest };
 
 /** Lowercase, NFC, and drop spaces and hyphens so `#travel-book` and `#travelbook` hit "Travel book". */
@@ -81,7 +82,7 @@ export function rankTasks(query: string, entries: TaskEntry[], plannedIds: strin
 
 export interface BuildRowsArgs {
   input: string;
-  /** "start": Start row first (start-task, quick-start). "add": Add-only first (add-task). */
+  /** "start": Start row first (start-task, quick-start). "add": Add-only first, then Add-to-backlog, then Start (add-task). */
   mode: "start" | "add";
   /** Workable quests in store order, including Other. */
   quests: Quest[];
@@ -114,6 +115,10 @@ export function buildRows(a: BuildRowsArgs): StartRow[] {
   if (!parsed.text || !dest) return tasks;
   const start: StartRow = { kind: "start", text: parsed.text, quest: dest };
   const add: StartRow = { kind: "add", text: parsed.text, quest: dest };
-  const create = a.mode === "start" ? [start, add] : [add, start];
+  if (a.mode === "add") {
+    // Add mode: "Add only" always comes first, then the backlog row, then Start.
+    return [add, { kind: "backlog", text: parsed.text, quest: dest }, start, ...tasks];
+  }
+  const create = [start, add];
   return parsed.tokenUsed || tasks.length === 0 ? [...create, ...tasks] : [...tasks, ...create];
 }

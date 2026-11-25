@@ -111,6 +111,7 @@ export class Timer {
       note: opts.note ?? "",
     };
     this.plugin.settings.lastWork = { ...run };
+    this.boxAnnounced = 0;
     await this.plugin.saveSettings();
     this.plugin.refreshViews();
   }

@@ -314,14 +314,14 @@ function taskMenu(ctx: Ctx, task: Task, quest: Quest | undefined): Menu {
   const m = new Menu();
   const today = ctx.today;
   if (!task.done) {
-    m.addItem((i) =>
+    if (quest && store.isWorkable(quest)) m.addItem((i) =>
       i.setTitle(t("focus.now")).setIcon("crosshair").onClick(act(async () => {
         await store.moveToDay(task, today, "top");
         await plugin.timer.start(task);
         ctx.view.showTab("focus");
       })),
     );
-    m.addSeparator();
+    if (quest && store.isWorkable(quest)) m.addSeparator();
     const current = store.scheduledDay(task, today);
     for (const { day, label } of moveTargets(today)) {
       m.addItem((i) =>
