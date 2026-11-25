@@ -66,6 +66,8 @@ export async function connect(port) {
     });
   await send("Runtime.enable");
   await send("Page.enable");
+  // Act as the focused window, so focus checks pass while you work in another app.
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 
   /** Run code in the page (async body, `return` a JSON-able value). */
   const ev = async (body, ms = 20000) => {

@@ -218,3 +218,64 @@ export function writeAnswers(content: string, parent: string, answers: [string, 
   const tail = ls.slice(end);
   return [...ls.slice(0, p), ...block, ...(tail.length ? tail : [])].join("\n").replace(/\n{3,}/g, "\n\n").replace(/\s*$/, "\n");
 }
+
+// ---------------------------------------------------------------- one-paragraph sections (closing line, check-ins)
+
+/** Line of the first "## h" (h any of `headings`) after the frontmatter, or -1. */
+function findSection(ls: string[], headings: string[]): number {
+  const start = bodyStart(ls);
+  const want = new Set(headings.map((h) => `## ${h}`));
+  return ls.findIndex((l, i) => i >= start && want.has(bare(l).trim()));
+}
+
+/** Line after the section that starts at `h`: the next # or ## heading, or the end. */
+function sectionEnd(ls: string[], h: number): number {
+  for (let i = h + 1; i < ls.length; i++) if (/^#{1,2} /.test(bare(ls[i] ?? ""))) return i;
+  return ls.length;
+}
+
+/** Text of the first section under any of `headings`, trimmed; "" when missing. */
+export function readSectionText(content: string, headings: string[]): string {
+  const ls = splitLines(content);
+  const h = findSection(ls, headings);
+  if (h < 0) return "";
+  return ls.slice(h + 1, sectionEnd(ls, h)).map(bare).join("\n").trim();
+}
+
+/**
+ * Set the text of the section under `heading` (or an existing one under any of `also`, which keeps its heading).
+ * Empty text removes the section. A missing section is appended at the end. Other lines stay byte for byte.
+ */
+export function writeSectionText(content: string, heading: string, text: string, also: string[] = []): string {
+  const ls = splitLines(content);
+  const eol = eolOf(content);
+  const h = findSection(ls, [heading, ...also]);
+  const body = text.trim();
+  if (h < 0) {
+    if (!body) return content;
+    const trimmed = content.replace(/\s*$/, "");
+    return `${trimmed}${trimmed ? eol + eol : ""}## ${heading}${eol}${body}${eol}`;
+  }
+  const end = sectionEnd(ls, h);
+  if (!body) {
+    if (end < ls.length) {
+      ls.splice(h, end - h);
+      return ls.join("\n");
+    }
+    const before = ls.slice(0, h).join("\n").replace(/\s*$/, "");
+    return before ? before + eol : "";
+  }
+  const lines = body.split(/\r?\n/).map((l) => (eol === "\r\n" ? `${l}\r` : l));
+  if (end < ls.length) lines.push(eol === "\r\n" ? "\r" : "");
+  else if (content.endsWith("\n")) lines.push("");
+  ls.splice(h + 1, end - h - 1, ...lines);
+  return ls.join("\n");
+}
+
+/** Append `line` to the first section under any of `headings`; a missing section is created as `headings[0]`. */
+export function appendToSectionAny(content: string, headings: string[], line: string): string {
+  const ls = splitLines(content);
+  const h = findSection(ls, headings);
+  const name = h < 0 ? headings[0]! : bare(ls[h]!).trim().slice(3);
+  return appendToSection(content, name, line);
+}

@@ -42,6 +42,11 @@ describe("mergeSettings", () => {
     expect(m).toMatchObject({ nudgeMinutes: 0, checkinWeeks: 5, lastWork: lw });
   });
 
+  it("keeps checkinWeeks between 2 and 8", () => {
+    expect(mergeSettings(defaults, { checkinWeeks: 1 }).checkinWeeks).toBe(2);
+    expect(mergeSettings(defaults, { checkinWeeks: 40 }).checkinWeeks).toBe(8);
+  });
+
   it("normalises nudgeMinutes to the offered choices", () => {
     for (const bad of [12, -5, 600, 0.5, "15"]) expect(mergeSettings(defaults, { nudgeMinutes: bad }).nudgeMinutes).toBe(15);
     for (const ok of [0, 10, 15, 20, 30, 45]) expect(mergeSettings(defaults, { nudgeMinutes: ok }).nudgeMinutes).toBe(ok);
@@ -63,5 +68,13 @@ describe("formatDate", () => {
   });
   it("uses the given language", () => {
     expect(formatDate(d, "de", { month: "long" })).toBe("März");
+  });
+});
+
+describe("question lists", () => {
+  it("keeps string lists and drops wrong types", () => {
+    expect((mergeSettings(defaults, { monthlyQuestions: [" a ", 3, ""] }) as Record<string, unknown>).monthlyQuestions).toEqual(["a"]);
+    expect((mergeSettings(defaults, { monthlyQuestions: "x" }) as Record<string, unknown>).monthlyQuestions).toBeNull();
+    expect("monthlyQuestions" in mergeSettings(defaults, {})).toBe(false);
   });
 });

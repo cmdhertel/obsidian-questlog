@@ -1,6 +1,6 @@
 // Review: the weekly ritual. Where did the time go (quest work vs. other, per quest vs. target, per day, 8-week trend),
 // what got done, and the weekly questions — saved into a review note with a numeric summary in the frontmatter.
-import { setIcon } from "obsidian";
+// Month, quarter and year (#23) share the frame and live in review-periods.ts.
 import { addDays, fmtDuration, fmtHours, isoWeek, parseDay, weekDays } from "../../data/dates";
 import { minutesByQuest, totalMinutes } from "../../data/stats";
 import type { Quest, Session } from "../../data/model";
@@ -8,9 +8,17 @@ import { OTHER_COLOR } from "../../data/store";
 import { weeklyQuestions, weeklyTargetHours } from "../../settings";
 import { fmtDate, t, weekdayShort } from "../../i18n";
 import type { Ctx } from "../ctx";
-import { act, bar, button, dot, empty, iconButton, pageHead, questName, sectionHead, statCard } from "../components";
+import { bar, button, dot, empty, iconButton, pageHead, questName, sectionHead, statCard } from "../components";
+import { doneList, questions, splitCard, summaryOf } from "./review-shared";
+import { periodSwitch, renderPeriod } from "./review-periods";
 
 export function renderReview(el: HTMLElement, ctx: Ctx): void {
+  const p = ctx.state.reviewPeriod;
+  if (p === "week") renderWeek(el, ctx);
+  else renderPeriod(el, ctx, p);
+}
+
+export function renderWeek(el: HTMLElement, ctx: Ctx): void {
   const { store, plugin, state, today } = ctx;
   const days = weekDays(state.reviewDay);
   const week = isoWeek(days[0]!);
@@ -24,6 +32,7 @@ export function renderReview(el: HTMLElement, ctx: Ctx): void {
 
   const range = `${fmtDate(parseDay(days[0]!), { day: "numeric", month: "short" })} – ${fmtDate(parseDay(days[6]!), { day: "numeric", month: "short" })}`;
   const actions = pageHead(el, t("review.title"), `${t("common.week")} ${week.replace(/^\d{4}-W0?/, "")} · ${range}`);
+  periodSwitch(actions, ctx);
   const nav = actions.createDiv({ cls: "ql-navgroup" });
   iconButton(nav, "chevron-left", t("nav.prevWeek"), () => {
     state.reviewDay = addDays(state.reviewDay, -7);
@@ -58,19 +67,7 @@ export function renderReview(el: HTMLElement, ctx: Ctx): void {
   const grid = el.createDiv({ cls: "ql-review" });
 
   // Quest work vs. other
-  const split = grid.createDiv({ cls: "ql-card ql-section" });
-  sectionHead(split, t("review.split"), "split", fmtHours(total));
-  if (!total) empty(split, t("review.noTime"), "timer");
-  else {
-    const sb = split.createDiv({ cls: "ql-split" });
-    const qPart = sb.createDiv({ cls: "ql-split-part is-quest" });
-    qPart.style.flexGrow = String(questMin);
-    const oPart = sb.createDiv({ cls: "ql-split-part is-other" });
-    oPart.style.flexGrow = String(otherMin);
-    const legend = split.createDiv({ cls: "ql-legend" });
-    legendItem(legend, "var(--interactive-accent)", t("review.questWork"), fmtHours(questMin));
-    legendItem(legend, OTHER_COLOR, t("other.name"), fmtHours(otherMin));
-  }
+  splitCard(grid, total, questMin, otherMin);
 
   // Hours by quest vs. targets
   const byQuest = minutesByQuest(sessions);
@@ -89,7 +86,7 @@ export function renderReview(el: HTMLElement, ctx: Ctx): void {
     bar(r, min, targetMin || maxMin, color);
     r.createSpan({ cls: "ql-mono ql-small", text: targetMin ? `${fmtHours(min)} / ${targetMin / 60}h` : fmtHours(min) });
     const pct = targetMin ? Math.round((min / targetMin) * 100) : null;
-    r.createSpan({ cls: "ql-small " + (pct === null ? "ql-muted" : pct >= 100 ? "ql-good" : pct < 50 ? "ql-warn" : "ql-muted"), text: pct === null ? "" : `${pct}%` });
+    r.createSpan({ cls: "ql-small " + (pct === null ? "ql-muted" : pct >= 100 ? "ql-good" : "ql-muted"), text: pct === null ? "" : `${pct}%` });
   };
   for (const q of quests) row(q.name, q.color, byQuest.get(q.name) ?? 0, q.weeklyHours * 60);
   for (const name of orphan) row(name, OTHER_COLOR, byQuest.get(name) ?? 0, 0);
@@ -143,45 +140,14 @@ export function renderReview(el: HTMLElement, ctx: Ctx): void {
   }
 
   // Done list
-  const dc = el.createDiv({ cls: "ql-card ql-section" });
-  sectionHead(dc, t("review.doneList"), "check-circle-2", String(done.length));
-  if (!done.length) empty(dc, t("review.doneEmpty"), "sunrise");
-  const dl = dc.createDiv({ cls: "ql-donelog" });
-  for (const day of [...days].reverse()) {
-    const items = done.filter((x) => x.doneDate === day);
-    if (!items.length) continue;
-    dl.createDiv({ cls: "ql-donelog-day", text: fmtDate(parseDay(day), { weekday: "long", day: "numeric", month: "short" }) });
-    for (const task of items) {
-      const r = dl.createDiv({ cls: "ql-donelog-item" });
-      const q = store.questOf(task);
-      setIcon(r.createSpan({ cls: "ql-donelog-check" }), "check");
-      r.createSpan({ cls: "ql-donelog-text", text: task.text });
-      if (q) {
-        const qs = r.createSpan({ cls: "ql-task-quest" });
-        dot(qs, q.color);
-        qs.createSpan({ text: questName(q) });
-      }
-    }
-  }
+  doneList(el, ctx, days, done, t("review.doneEmpty"));
 
   // Weekly questions
   const existing = store.reviews.get(week);
   questions(el, ctx, `week:${week}`, weeklyQuestions(plugin.settings), existing?.answers ?? {}, async (answers) => {
-    const summary: Record<string, number | string> = {
-      hours_total: round1(total / 60),
-      hours_quests: round1(questMin / 60),
-      hours_other: round1(otherMin / 60),
-      tasks_done: done.length,
-    };
-    for (const [name, min] of byQuest) {
-      if (!store.isQuestWork(name)) continue;
-      summary[`hours_${name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "_")}`] = round1(min / 60);
-    }
-    return store.saveReview(week, answers, summary);
+    return store.saveReview(week, answers, summaryOf(store, sessions, { total, questMin, otherMin }, done.length));
   }, existing?.path);
 }
-
-const round1 = (h: number) => Math.round(h * 10) / 10;
 
 /** Minutes per quest of a day, in quest order with Other last (stable stacking). */
 function sortedByQuest(ctx: Ctx, list: Session[]): [string, number][] {
@@ -190,44 +156,4 @@ function sortedByQuest(ctx: Ctx, list: Session[]): [string, number][] {
     return q?.kind === "quest" ? ctx.store.quests.indexOf(q) : 1e6;
   };
   return [...minutesByQuest(list)].sort((a, b) => order(a[0]) - order(b[0]));
-}
-
-function legendItem(parent: HTMLElement, color: string, label: string, value: string): void {
-  const i = parent.createDiv({ cls: "ql-legend-item" });
-  dot(i, color);
-  i.createSpan({ text: label });
-  i.createSpan({ cls: "ql-mono ql-muted", text: value });
-}
-
-function questions(
-  el: HTMLElement,
-  ctx: Ctx,
-  key: string,
-  qs: string[],
-  saved: Record<string, string>,
-  save: (answers: [string, string][]) => Promise<unknown>,
-  notePath?: string,
-): void {
-  const { state, plugin } = ctx;
-  const card = el.createDiv({ cls: "ql-card ql-section" });
-  const head = sectionHead(card, t("review.reflect"), "notebook-pen");
-  if (notePath) iconButton(head, "file-text", t("task.openNote"), () => void plugin.app.workspace.openLinkText(notePath, "", false));
-  const form = card.createDiv({ cls: "ql-questions" });
-  const fields: [string, HTMLTextAreaElement][] = [];
-  for (const q of qs) {
-    const draftKey = `${key}|${q}`;
-    const f = form.createDiv({ cls: "ql-question" });
-    f.createEl("label", { text: q });
-    const ta = f.createEl("textarea", { cls: "ql-answer", attr: { rows: "3" } });
-    ta.value = state.drafts.get(draftKey) ?? saved[q] ?? "";
-    ta.oninput = () => state.drafts.set(draftKey, ta.value);
-    fields.push([q, ta]);
-  }
-  const actions = form.createDiv({ cls: "ql-question-actions" });
-  if (fields.some(([q]) => state.drafts.has(`${key}|${q}`))) actions.createSpan({ cls: "ql-muted ql-small", text: t("review.unsaved") });
-  button(actions, t("common.save"), act(async () => {
-    await save(fields.map(([q, ta]) => [q, ta.value]));
-    for (const [q] of fields) state.drafts.delete(`${key}|${q}`);
-    ctx.rerender();
-  }), { icon: "save", cta: true });
 }

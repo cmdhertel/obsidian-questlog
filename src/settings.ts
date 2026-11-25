@@ -1,7 +1,8 @@
 import { App, PluginSettingTab, Setting, normalizePath, type SettingDefinition, type SettingDefinitionItem } from "obsidian";
 import type QuestlogPlugin from "./main";
 import type { LastWork, Quest, RunningTimer } from "./data/model";
-import { mergeSettings } from "./data/settings-merge";
+import { mergeSettings, pickQuestions } from "./data/settings-merge";
+import type { Period } from "./data/periods";
 import { NUDGE_OPTIONS } from "./data/nudge";
 import { t, type Key } from "./i18n";
 import { act } from "./ui/components";
@@ -23,17 +24,21 @@ export interface QuestlogSettings {
   pomodoroMinutes: number;
   /** null = use the default questions of the current language */
   weeklyQuestions: string[] | null;
+  /** Monthly review questions; null = the defaults of the current language. */
+  monthlyQuestions: string[] | null;
   /** JS weekday (0 = Sunday) on which the weekly review is due. */
   reviewDay: number;
   timer: RunningTimer | null;
   lastTab: TabId;
   /** Last day (YYYY-MM-DD) or week the start, close, week and check-in rituals were dismissed. */
   rituals: { start: string | null; close: string | null; week: string | null; checkin: string | null };
-  /** Weeks of data the goal check-in looks at. */
+  /** Quiet weeks before a quest check-in is offered (2 to 8). */
   checkinWeeks: number;
   /** Active minutes before the nudge appears. 0 = off. */
   nudgeMinutes: number;
   lastWork: LastWork | null;
+  /** Calendar layout: one day, the week, or "auto" (one day on narrow panes, else the week). */
+  calendarView: "auto" | "day" | "week";
 }
 
 export const DEFAULT_SETTINGS: QuestlogSettings = {
@@ -45,6 +50,7 @@ export const DEFAULT_SETTINGS: QuestlogSettings = {
   weeklyTarget: 20,
   pomodoroMinutes: 0,
   weeklyQuestions: null,
+  monthlyQuestions: null,
   reviewDay: 0,
   timer: null,
   lastTab: "home",
@@ -52,14 +58,31 @@ export const DEFAULT_SETTINGS: QuestlogSettings = {
   checkinWeeks: 3,
   nudgeMinutes: 15,
   lastWork: null,
+  calendarView: "auto",
 };
 
 export const TIME_BOXES = [0, 25, 50, 90];
 
 export function weeklyQuestions(s: QuestlogSettings): string[] {
-  return s.weeklyQuestions?.length
-    ? s.weeklyQuestions
-    : [t("q.weekly.1"), t("q.weekly.2"), t("q.weekly.3"), t("q.weekly.4")];
+  return pickQuestions(s.weeklyQuestions, [t("q.weekly.1"), t("q.weekly.2"), t("q.weekly.3"), t("q.weekly.4")]);
+}
+
+export function monthlyQuestions(s: QuestlogSettings): string[] {
+  return pickQuestions(s.monthlyQuestions, [t("q.monthly.1"), t("q.monthly.2"), t("q.monthly.3")]);
+}
+
+/** The questions of a review period. Week and month follow the settings; quarter and year are fixed texts. */
+export function periodQuestions(s: QuestlogSettings, period: Period): string[] {
+  switch (period) {
+    case "week":
+      return weeklyQuestions(s);
+    case "month":
+      return monthlyQuestions(s);
+    case "quarter":
+      return [t("q.quarterly.1"), t("q.quarterly.2"), t("q.quarterly.3")];
+    case "year":
+      return [t("q.yearly.1"), t("q.yearly.2"), t("q.yearly.3")];
+  }
 }
 
 const linesOf = (v: string): string[] => v.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -231,6 +254,25 @@ export class QuestlogSettingTab extends PluginSettingTab {
               c.setValue(weeklyQuestions(plugin.settings).join("\n")).onChange(async (v) => {
                 plugin.settings.weeklyQuestions = linesOf(v);
                 await save();
+              });
+            }),
+          ),
+          row(t("set.monthlyQ"), "set.alias.monthlyQ", t("set.questionsDesc"), (x) =>
+            x.addTextArea((c) => {
+              c.inputEl.rows = 4;
+              c.setValue(monthlyQuestions(plugin.settings).join("\n")).onChange(async (v) => {
+                plugin.settings.monthlyQuestions = linesOf(v);
+                await save();
+              });
+            }),
+          ),
+          row(t("set.checkinWeeks"), "set.alias.checkinWeeks", t("set.checkinWeeksDesc"), (x) =>
+            x.addDropdown((d) => {
+              for (let n = 2; n <= 8; n++) d.addOption(String(n), t("set.checkinWeeksN", { n }));
+              d.setValue(String(plugin.settings.checkinWeeks)).onChange(async (v) => {
+                plugin.settings.checkinWeeks = Number(v);
+                await save();
+                plugin.refreshViews();
               });
             }),
           ),

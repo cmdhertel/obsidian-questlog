@@ -1,3 +1,5 @@
+import type { Period } from "./periods";
+
 export type QuestStatus = "active" | "paused" | "done";
 
 export interface Task {
@@ -92,12 +94,26 @@ export interface DayLog {
   /** Time that is not work, from the `breaks` frontmatter. */
   breaks: Span[];
   sessions: Session[];
+  /** `day_started`, minutes since midnight. */
+  dayStarted: number | null;
+  /** `one_thing`: id of the task chosen when starting the day; "" when unset. */
+  oneThing: string;
+  /** `day_closed`, minutes since midnight. */
+  dayClosed: number | null;
+  /** Text of the `## Closing line` section. */
+  closingLine: string;
 }
 
 export interface Review {
   path: string;
+  /** Period id, the file name: "2026-W47", "2026-11", "2026-Q4" or "2026". */
+  id: string;
+  period: Period;
+  /** The ISO week id for weekly reviews; "" for longer periods. */
   week: string;
   answers: Record<string, string>;
+  /** `plan_hours`: hours per quest name for the week; null when the note has none. */
+  planHours: Record<string, number> | null;
 }
 
 export interface RunningTimer {

@@ -3,7 +3,7 @@ import type { Quest, Task } from "../data/model";
 import { addDays, fmtDuration, parseDay } from "../data/dates";
 import type { ContinueTarget } from "../data/lastwork";
 import type { Position } from "../data/plan";
-import { t } from "../i18n";
+import { fmtDate, t } from "../i18n";
 import type { Ctx } from "./ctx";
 import { workTitle } from "../data/timerlog";
 import { ConfirmModal, TextModal } from "./modals";
@@ -222,6 +222,16 @@ export interface TaskRowOpts {
   compact?: boolean;
   /** Extra note shown after the text (e.g. "carried over"). */
   hint?: string;
+  /** Clamp the text to three lines with a button to show all of it (#27, board cards). */
+  expandable?: boolean;
+}
+
+/** Show the expand button of every clamped task text under `root` whose text is really cut off. */
+export function revealClampButtons(root: HTMLElement): void {
+  root.querySelectorAll<HTMLElement>(".ql-task-text.ql-clamp:not(.is-open)").forEach((text) => {
+    const btn = text.parentElement?.querySelector<HTMLElement>(".ql-task-expand");
+    if (btn && text.clientHeight > 0) btn.hidden = text.scrollHeight <= text.clientHeight + 1;
+  });
 }
 
 /** Key that finds a task even before it has an id. */
@@ -244,7 +254,10 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
   });
   if (quest) row.style.setProperty("--ql-color", quest.color);
 
-  const cb = row.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox ql-check" });
+  // The label gives the small checkbox a 44 px hit area on touch screens (see styles.css, #29).
+  const hit = row.createEl("label", { cls: "ql-check-hit" });
+  hit.onclick = (e) => e.stopPropagation();
+  const cb = hit.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox ql-check" });
   cb.checked = task.done;
   cb.setAttr("aria-label", task.done ? t("task.reopen") : t("task.complete"));
   cb.onclick = (e) => e.stopPropagation();
@@ -254,7 +267,32 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
   });
 
   const main = row.createDiv({ cls: "ql-task-main" });
-  main.createSpan({ cls: "ql-task-text", text: task.text });
+  const text = main.createSpan({ cls: "ql-task-text", text: task.text });
+  if (opts.expandable) {
+    const key = `task:${taskKey(task)}`;
+    const open = ctx.state.expanded.has(key);
+    text.addClass("ql-clamp");
+    text.style.setProperty("--ql-clamp", "3");
+    text.toggleClass("is-open", open);
+    const more = main.createEl("button", { cls: "ql-linkbtn ql-small ql-task-expand", attr: { "aria-expanded": String(open) } });
+    const label = (isOpen: boolean) => {
+      more.setText(t(isOpen ? "task.collapse" : "task.expand"));
+      more.setAttr("aria-label", `${t(isOpen ? "task.collapse" : "task.expand")}: ${task.text.slice(0, 60)}`);
+    };
+    label(open);
+    more.hidden = !open;
+    more.onclick = (e) => {
+      e.stopPropagation();
+      const next = !ctx.state.expanded.has(key);
+      if (next) ctx.state.expanded.add(key);
+      else ctx.state.expanded.delete(key);
+      text.toggleClass("is-open", next);
+      more.setAttr("aria-expanded", String(next));
+      label(next);
+    };
+    // The button appears only when the text is really cut off (checked after layout).
+    if (!open) row.win.requestAnimationFrame(() => revealClampButtons(row));
+  }
   if ((opts.showQuest && quest) || opts.hint) {
     const meta = main.createDiv({ cls: "ql-task-meta" });
     if (opts.showQuest && quest) {
@@ -300,6 +338,12 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
   return row;
 }
 
+/** Short label for a planned day: "Today" or "Mon, Nov 24". */
+export function dayHint(day: string, today: string): string {
+  if (day === today) return t("nav.today");
+  return fmtDate(parseDay(day), { weekday: "short", day: "numeric", month: "short" });
+}
+
 /** Days offered in the "Move to" menu: today and the next six days. */
 function moveTargets(today: string): { day: string; label: string }[] {
   return Array.from({ length: 7 }, (_, i) => {
@@ -343,6 +387,26 @@ function taskMenu(ctx: Ctx, task: Task, quest: Quest | undefined): Menu {
       }),
     );
   }
+  if (quest?.stages.length) {
+    m.addSeparator();
+    m.addItem((i) => i.setTitle(t("stage.moveTask")).setIsLabel(true));
+    for (const s of quest.stages) {
+      m.addItem((i) =>
+        i
+          .setTitle(s.name || `${t("stage.title")} ${s.index + 1}`)
+          .setIcon(s.reached ? "check" : "milestone")
+          .setChecked(task.stageIndex === s.index)
+          .onClick(act(() => (task.stageIndex === s.index ? Promise.resolve() : store.moveTaskToStage(task, s)))),
+      );
+    }
+    m.addItem((i) =>
+      i
+        .setTitle(t("stage.loose"))
+        .setIcon("list")
+        .setChecked(task.stageIndex === null)
+        .onClick(act(() => (task.stageIndex === null ? Promise.resolve() : store.moveTaskToStage(task, "loose")))),
+    );
+  }
   m.addSeparator();
   m.addItem((i) =>
     i.setTitle(t("task.delete")).setIcon("trash-2").setWarning(true).onClick(() =>
@@ -362,7 +426,7 @@ export function dropTarget(list: HTMLElement, ctx: Ctx, day: string | null): voi
     list.querySelectorAll(".is-drop-before").forEach((el) => el.removeClass("is-drop-before"));
   };
   const rowAt = (e: DragEvent): HTMLElement | null => {
-    const rows = Array.from(list.querySelectorAll<HTMLElement>(".ql-task[data-key]:not(.is-done):not(.is-dragging)"));
+    const rows = Array.from(list.querySelectorAll<HTMLElement>(".ql-task[data-key]:not(.is-done):not(.is-dragging):not([hidden])"));
     return rows.find((r) => {
       const b = r.getBoundingClientRect();
       return e.clientY < b.top + b.height / 2;

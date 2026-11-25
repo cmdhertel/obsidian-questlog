@@ -9,7 +9,7 @@
 //      (desktop, English). A screenshot <step>-<size>-<lang>.png is taken after every step (`shot: false` skips it).
 //   4. Console errors during a step fail it. Texts in German: match both languages, e.g. /Start|Starten/.
 //   Run only yours: npm run smoke -- --only my-step
-import { sleep } from "./cdp.mjs";
+import { setViewport, sleep } from "./cdp.mjs";
 
 const PRE = `const P=app.plugins.plugins.questlog; const R=()=>app.workspace.getLeavesOfType("questlog-view")[0]?.view.contentEl; const sleep=ms=>new Promise(r=>setTimeout(r,ms)); const timer=()=>P.settings.timer;`;
 const ev = (ctx, body, ms) => ctx.c.ev(`${PRE}\n${body}`, ms);
@@ -41,6 +41,14 @@ export async function clickIn(ctx, selector, re, scope = "R()") {
   await sleep(500);
 }
 
+/**
+ * Page code that drops leftover dialogs. Removing a modal's element leaves its keymap scope active, and Obsidian then
+ * blurs every focus outside that modal (Keymap.onFocusIn), so the scopes are popped too. The trust-vault dialog of a
+ * fresh profile is the usual case.
+ */
+const DROP_MODALS = `document.querySelectorAll(".modal-container,.prompt,.menu").forEach((n) => n.remove());
+  { const km = app.keymap, st = km.getWindowStack?.(window); for (let i = 0; st && st.scope && st.scope !== km.rootScope && i < 10; i++) km.popScope(st.scope); }`;
+
 const modalCount = (ctx) => ev(ctx, `return document.querySelectorAll(".modal-container").length`);
 
 // ---------------------------------------------------------------- app helpers (used by smoke.mjs)
@@ -60,7 +68,7 @@ export async function enablePlugin(ctx) {
       await app.plugins.enablePlugin("questlog");
     }
     app.setting?.close?.();
-    document.querySelectorAll(".modal-container").forEach((m) => m.remove());
+    ${DROP_MODALS}
     app.workspace.leftSplit.collapse(); app.workspace.rightSplit.collapse();
     return !!app.plugins.plugins.questlog;`, 30000);
   await wait(ctx, `app.plugins.plugins.questlog?.store?.quests?.length > 0`, "Questlog to load the demo quests", 20000);
@@ -72,7 +80,7 @@ export async function resetState(ctx) {
     await ctx.c.key("Escape", "Escape", 27);
     await sleep(250);
   }
-  await ev(ctx, `document.querySelectorAll(".modal-container,.prompt,.notice,.tooltip").forEach(n=>n.remove()); if (timer()) await P.timer.discard(); app.workspace.getLeavesOfType("questlog-view").forEach(l=>l.detach()); await sleep(300);`);
+  await ev(ctx, `${DROP_MODALS} document.querySelectorAll(".notice,.tooltip").forEach(n=>n.remove()); if (timer()) await P.timer.discard(); app.workspace.getLeavesOfType("questlog-view").forEach(l=>l.detach()); await sleep(300);`);
 }
 
 /**
@@ -80,6 +88,14 @@ export async function resetState(ctx) {
  * `hover: none` cannot be emulated over CDP, so the touch rules are injected as always-on styles.
  */
 export async function setPhone(ctx, on) {
+  // Switching Obsidian's emulation reloads the page: switch, wait for the reload, then inject the touch rules.
+  const changed = await ctx.c.ev(
+    `const was=document.body.classList.contains("is-mobile"); if (was !== ${on}) setTimeout(()=>{ try { app.emulateMobile?.(${on}); } catch {} }, 50); return was !== ${on};`,
+  );
+  if (changed) {
+    await sleep(2000);
+    await wait(ctx, `window.app && app.workspace && app.workspace.layoutReady && app.plugins.plugins.questlog?.store?.quests?.length > 0`, "Obsidian after the emulation switch", 60000);
+  }
   await ctx.c.ev(
     `
     document.getElementById("smoke-touch")?.remove();
@@ -89,11 +105,39 @@ export async function setPhone(ctx, on) {
       s.textContent = css.replace(/@media\\s*\\(hover:\\s*none\\)/g, "@media all");
       document.head.appendChild(s);
     }
-    try { app.emulateMobile?.(${on}); } catch {}
     return 1`,
   );
-  await sleep(700);
+  await sleep(500);
 }
+
+/** The text of every note under Questlog/, to put back after a step that writes. */
+async function snapshot(ctx) {
+  return ev(ctx, `const out={}; for (const f of app.vault.getMarkdownFiles()) if (f.path.startsWith("Questlog/")) out[f.path]=await app.vault.read(f); return out;`);
+}
+
+/** Put the notes back as `snap` had them and delete notes the step created. */
+async function restore(ctx, snap) {
+  await ev(ctx, `const snap=${JSON.stringify(snap)};
+    for (const f of app.vault.getMarkdownFiles()) {
+      if (!f.path.startsWith("Questlog/")) continue;
+      if (!(f.path in snap)) await app.vault.delete(f);
+      else if ((await app.vault.read(f)) !== snap[f.path]) await app.vault.modify(f, snap[f.path]);
+    }
+    await sleep(700);`);
+}
+
+/** Run a Questlog command and wait for the ritual card on Home. */
+async function openRitual(ctx, command) {
+  await ev(ctx, `app.commands.executeCommandById("questlog:${command}"); await sleep(700);`);
+  await wait(ctx, `R()?.querySelector(".ql-ritual-card")`, `the ${command} card`);
+}
+
+/** Click a button in the open ritual card by its text. */
+const cardButton = (ctx, re) => clickIn(ctx, ".ql-ritual-card .ql-ritual-actions button", re);
+
+/** Fill a field like a person typing: value, then an input event. */
+const typeInto = (ctx, selector, text) =>
+  ev(ctx, `const el=R().querySelector(${JSON.stringify(selector)}); el.focus(); el.value=${JSON.stringify(text)}; el.dispatchEvent(new Event("input",{bubbles:true})); el.blur(); await sleep(200); return true;`);
 
 // ---------------------------------------------------------------- steps
 
@@ -558,5 +602,630 @@ export const steps = [
       assert(r.unload, "listeners survived unload");
     },
     timeout: 40000,
+  },
+
+  // ---------------------------------------------------------------- stages and story
+  {
+    name: "stage-path",
+    issue: "#13",
+    each: true,
+    run: async (ctx) => {
+      await tab(ctx, "quests");
+      await clickIn(ctx, ".ql-qcard", /Travel book/);
+      await wait(ctx, `R().querySelector(".ql-path")`, "the stage path");
+      const r = await ev(ctx, String.raw`
+        const v=R(), body=v.querySelector(".ql-body"), cur=v.querySelector(".ql-stage.is-current");
+        return {
+          nodes:[...v.querySelectorAll(".ql-stage-node")].map(n=>(n.className.match(/is-(\w+)/)||[])[1]).join(),
+          cur:cur?.querySelector(".ql-stage-name")?.textContent||"",
+          rows:cur?.querySelectorAll(".ql-task").length||0,
+          add:!!cur?.querySelector("input[data-add-key]"),
+          compass:cur?.querySelector(".ql-compass")?.textContent||"",
+          folded:[...v.querySelectorAll(".ql-stage:not(.is-current) button.ql-stage-toggle")].every(b=>b.getAttribute("aria-expanded")==="false"),
+          loose:[...v.querySelectorAll(".ql-section-title")].some(e=>/Loose tasks|Lose Aufgaben/.test(e.textContent)),
+          overflow:body.scrollWidth-body.clientWidth,
+          warn:!!v.querySelector(".ql-warn"),
+        };`);
+      assert(r.nodes === "reached,current,upcoming", `nodes ${r.nodes}`);
+      assert(r.cur.startsWith("Drafting") && r.rows >= 2 && r.add, `current stage: ${JSON.stringify(r)}`);
+      assert(/\d/.test(r.compass), `no compass: ${JSON.stringify(r)}`);
+      assert(r.folded && r.loose, `folds: ${JSON.stringify(r)}`);
+      assert(r.overflow <= 1, `page scrolls sideways by ${r.overflow}px`);
+      assert(!r.warn, "a warning colour is used");
+      // Unfold a reached stage: its done tasks show.
+      await clickIn(ctx, "button.ql-stage-toggle", /Research|Recherche/);
+      await wait(ctx, `R().querySelector(".ql-stage.is-reached.is-open .ql-task.is-done")`, "the done tasks of Research");
+    },
+  },
+  {
+    name: "quest-story",
+    issue: "#16",
+    each: true,
+    run: async (ctx) => {
+      await tab(ctx, "quests");
+      await clickIn(ctx, ".ql-qcard", /Travel book/);
+      const before = await ev(ctx, `return (await app.vault.adapter.stat("Questlog/Quests/Travel book.md")).mtime`);
+      await clickIn(ctx, ".ql-seg-btn", /Story|Geschichte/);
+      await wait(ctx, `R().querySelector(".ql-story-week")`, "the story");
+      const r = await ev(ctx, String.raw`
+        const v=R(), weeks=[...v.querySelectorAll(".ql-story-week")];
+        return {n:weeks.length, first:weeks[0]?.querySelector("h3")?.textContent||"",
+          reached:v.textContent.includes("Research"), overflow:v.querySelector(".ql-body").scrollWidth-v.querySelector(".ql-body").clientWidth,
+          mtime:(await app.vault.adapter.stat("Questlog/Quests/Travel book.md")).mtime};`);
+      assert(r.n >= 2 && r.n <= 8, `chapters: ${r.n}`);
+      assert(/^(Week|Woche) \d+ · /.test(r.first), `chapter title ${r.first}`);
+      assert(r.reached, "the reached stage is missing from the story");
+      assert(r.overflow <= 1, `page scrolls sideways by ${r.overflow}px`);
+      assert(r.mtime === before, "the story wrote to the quest note");
+    },
+  },
+  {
+    name: "week-dots",
+    issue: "#15",
+    each: true,
+    run: async (ctx) => {
+      await tab(ctx, "quests");
+      const r = await ev(ctx, String.raw`
+        const c=[...R().querySelectorAll(".ql-qcard")].find(e=>e.textContent.includes("Travel book"));
+        const dots=[...c.querySelectorAll(".ql-dot-week")];
+        return {n:dots.length, current:dots.filter(d=>d.classList.contains("is-current")).length, labels:dots.every(d=>d.getAttribute("aria-label")),
+          text:c.querySelector(".ql-dots-text")?.textContent||"", stage:c.querySelector(".ql-qcard-stage")?.textContent||""};`);
+      assert(r.n >= 2 && r.n <= 12 && r.current === 1 && r.labels, `dots: ${JSON.stringify(r)}`);
+      assert(/\d/.test(r.text), `dots text: ${r.text}`);
+      assert(/Drafting/.test(r.stage), `stage line: ${r.stage}`);
+    },
+  },
+  {
+    name: "stage-edit",
+    issue: "#13",
+    run: async (ctx) => {
+      const path = "Questlog/Quests/Travel book.md";
+      const before = await ev(ctx, `return await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(path)}))`);
+      try {
+        await tab(ctx, "quests");
+        await clickIn(ctx, ".ql-qcard", /Travel book/);
+        await clickIn(ctx, "button.ql-stage-add");
+        await wait(ctx, `document.querySelectorAll(".modal-container").length===1`, "the stage dialog");
+        await ctx.c.send("Input.insertText", { text: "Proofing" });
+        await sleep(300);
+        await ctx.c.key("Enter", "Enter", 13);
+        await wait(ctx, `P.store.quest("Travel book").stages.some(s=>s.name==="Proofing")`, "the new stage");
+        await wait(ctx, `document.activeElement?.classList.contains("ql-stage-add")`, "focus back on Add stage");
+        const r = await ev(ctx, String.raw`
+          const f=app.vault.getAbstractFileByPath(${JSON.stringify(path)}); const q=()=>P.store.quest("Travel book"); const out={};
+          try { await P.store.addStage(q(),"research"); out.dup="written"; } catch(e) { out.dup=e.message; }
+          const drafting=q().stages.find(s=>s.name==="Drafting"); const open=q().tasks.filter(x=>!x.done&&x.stageIndex===drafting.index).map(x=>x.id);
+          await P.store.reachStage(q(),drafting,"next"); await sleep(600);
+          out.moved=open.every(id=>P.store.task(id)?.stage==="Editing");
+          out.editing=q().stages.find(s=>s.name==="Editing"); out.text=await app.vault.read(f);
+          const loose=P.store.task(open[0]); await P.store.moveTaskToStage(loose,"loose"); await sleep(500); out.loose=P.store.task(open[0])?.stage;
+          await P.store.deleteStage(q(),q().stages.find(s=>s.name==="Proofing")); await sleep(500);
+          out.deleted=!/### Proofing/.test(await app.vault.read(f)); out.count=q().tasks.length;
+          return out;`);
+        assert(/exists|existiert|gibt es/i.test(r.dup), `duplicate name: ${r.dup}`);
+        assert(r.moved && r.editing?.started && !r.editing?.reached, `reach: ${JSON.stringify(r)}`);
+        assert(/### Drafting.*✅/.test(r.text), "Drafting has no ✅");
+        assert(r.loose === null && r.deleted, `loose/delete: ${JSON.stringify(r)}`);
+      } finally {
+        await ev(ctx, `await app.vault.modify(app.vault.getAbstractFileByPath(${JSON.stringify(path)}), ${JSON.stringify(before)}); await sleep(600);`);
+      }
+    },
+  },
+  // ---------------------------------------------------------------- Home and rituals
+  {
+    name: "home-cards",
+    issue: "#17",
+    each: true,
+    run: async (ctx) => {
+      await tab(ctx, "home");
+      const r = await ev(ctx, String.raw`
+        const v=R(), cards=[...v.querySelectorAll(".ql-hcard")], body=v.querySelector(".ql-body");
+        const other=v.querySelector(".ql-section-other .ql-collapse-head");
+        return {
+          cards:cards.length, active:P.store.activeQuests().length,
+          names:cards.map(c=>c.querySelector(".ql-hcard-name")?.textContent).join(),
+          play:cards.every(c=>c.querySelector(".ql-hcard-play")),
+          heads:cards.every(c=>c.querySelector(".ql-hcard-head[role=button][aria-expanded]")),
+          next:cards.filter(c=>c.querySelector(".ql-hcard-next .ql-task, .ql-hcard-none")).length,
+          dots:cards.some(c=>c.querySelector(".ql-dot-week")),
+          lines:v.querySelectorAll(".ql-ritual-line").length,
+          otherFolded:other?.getAttribute("aria-expanded")==="false", otherRows:v.querySelectorAll(".ql-section-other .ql-task").length,
+          order:[".ql-vision",".ql-hcards",".ql-section-other",".ql-section-done"].map(s=>v.querySelector(s)).every((e,i,a)=>e&&(!i||a[i-1].compareDocumentPosition(e)&Node.DOCUMENT_POSITION_FOLLOWING)),
+          overflow:body.scrollWidth-body.clientWidth, warn:!!v.querySelector(".ql-warn"),
+        };`);
+      assert(r.cards === r.active && r.cards >= 2, `cards: ${JSON.stringify(r)}`);
+      assert(r.play && r.heads && r.next === r.cards && r.dots, `card parts: ${JSON.stringify(r)}`);
+      assert(r.lines <= 1, `${r.lines} ritual lines`);
+      assert(r.otherFolded && r.otherRows === 0, `Other is not folded: ${JSON.stringify(r)}`);
+      assert(r.order, "Home is not in the order vision, quests, Other, Done");
+      assert(r.overflow <= 1, `page scrolls sideways by ${r.overflow}px`);
+      assert(!r.warn, "a warning colour is used");
+      // Unfold a card and Other with the keyboard, fold them again.
+      const keyOn = (sel) => ev(ctx, `const el=R().querySelector(${JSON.stringify(sel)}); el.focus(); el.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true})); await sleep(400); return R().querySelector(${JSON.stringify(sel)})?.getAttribute("aria-expanded");`);
+      assert((await keyOn(".ql-hcard-head")) === "true", "Enter does not unfold a quest card");
+      assert((await keyOn(".ql-hcard-head")) === "false", "Enter does not fold a quest card");
+      assert((await keyOn(".ql-section-other .ql-collapse-head")) === "true", "Enter does not unfold Other");
+      assert(await ev(ctx, `return !!R().querySelector(".ql-section-other input[data-add-key]")`), "Other has no add field");
+      assert((await keyOn(".ql-section-other .ql-collapse-head")) === "false", "Enter does not fold Other");
+    },
+  },
+  {
+    name: "ritual-line",
+    issue: "#18",
+    run: async (ctx) => {
+      const saved = await ev(ctx, `return JSON.stringify(P.settings.rituals)`);
+      try {
+        await tab(ctx, "home");
+        // Nothing opens by itself: no card without a command or a click.
+        assert(!(await ev(ctx, `return !!R().querySelector(".ql-ritual-card")`)), "a ritual card opened by itself");
+        const line = await ev(ctx, `return R().querySelector(".ql-ritual-line")?.textContent||""`);
+        if (line) {
+          await clickIn(ctx, ".ql-ritual-line button", /Not now|Nicht jetzt/);
+          await wait(ctx, `!R().querySelector(".ql-ritual-line") || R().querySelector(".ql-ritual-line").textContent!==${JSON.stringify(line)}`, "the line to go");
+          assert(await ev(ctx, `return Object.values(P.settings.rituals).some(v=>v)`), "Not now was not remembered");
+        }
+        // A command opens the card at any time; Not now on the card closes it.
+        await openRitual(ctx, "ritual-start-day");
+        assert(await ev(ctx, `const c=R().querySelector(".ql-ritual-card"); return c.getAttribute("role")==="region" && !!c.getAttribute("aria-label") && document.activeElement===c`), "the card is not a focused region");
+        await cardButton(ctx, /Not now|Nicht jetzt/);
+        await wait(ctx, `!R().querySelector(".ql-ritual-card")`, "the card to close");
+      } finally {
+        await ev(ctx, `P.settings.rituals=JSON.parse(${JSON.stringify(saved)}); await P.saveSettings(); P.refreshViews(); await sleep(300);`);
+      }
+    },
+  },
+  {
+    name: "ritual-start-day",
+    issue: "#19",
+    run: async (ctx) => {
+      const snap = await snapshot(ctx);
+      try {
+        await openRitual(ctx, "ritual-start-day");
+        const rows = await ev(ctx, `return R().querySelectorAll(".ql-ritual-card .ql-ritual-row").length`);
+        assert(rows >= 2, `start card rows: ${rows}`);
+        await clickIn(ctx, ".ql-ritual-card .ql-ritual-row input[type=radio]");
+        assert(await ev(ctx, `const b=R().querySelector(".ql-ritual-go"); return !!b && !b.classList.contains("is-hidden") && /“|„/.test(b.textContent)`), "no Start button for the one thing");
+        await cardButton(ctx, /^(Done|Fertig) /);
+        await wait(ctx, `!R().querySelector(".ql-ritual-card")`, "the card to close");
+        const r = await ev(ctx, `const d=P.store.days.get(P.today()); return {started:d?.dayStarted, one:d?.oneThing, timer:!!P.settings.timer};`);
+        assert(r.started != null && r.one, `day note: ${JSON.stringify(r)}`);
+        assert(!r.timer, "Done started the timer");
+      } finally {
+        await restore(ctx, snap);
+      }
+    },
+  },
+  {
+    name: "ritual-close-day",
+    issue: "#20",
+    run: async (ctx) => {
+      const snap = await snapshot(ctx);
+      try {
+        await openRitual(ctx, "ritual-close-day");
+        for (let i = 0; i < 4 && !(await ev(ctx, `return !!R().querySelector(".ql-ritual-card textarea")`)); i++) await cardButton(ctx, /^(Next|Weiter) /);
+        await typeInto(ctx, ".ql-ritual-card textarea", "Smoke closing line.");
+        for (let i = 0; i < 3 && (await ev(ctx, `return [...R().querySelectorAll(".ql-ritual-card .ql-ritual-actions button")].some(b=>/^(Next|Weiter)$/.test(b.textContent))`)); i++) {
+          await cardButton(ctx, /^(Next|Weiter) /);
+        }
+        await cardButton(ctx, /Close the day|Tag abschließen/);
+        await wait(ctx, `R().querySelector(".ql-ritual-note")`, "the quiet note");
+        const day = await ev(ctx, `return P.today()`);
+        const text = await ev(ctx, `return await app.vault.adapter.read("Questlog/Days/${day}.md")`);
+        assert(/## (Closing line|Tagesfazit)\s+Smoke closing line\./.test(text), "no closing line in the day note");
+        assert(/day_closed: /.test(text), "no day_closed in the day note");
+      } finally {
+        await restore(ctx, snap);
+      }
+    },
+  },
+  {
+    name: "ritual-plan-week",
+    issue: "#21",
+    run: async (ctx) => {
+      const snap = await snapshot(ctx);
+      try {
+        await openRitual(ctx, "ritual-plan-week");
+        const n = await ev(ctx, `return R().querySelectorAll(".ql-ritual-card .ql-ritual-hours input").length`);
+        assert(n === (await ev(ctx, `return P.store.activeQuests().length`)), `hours fields: ${n}`);
+        const sum = await ev(ctx, `return R().querySelector(".ql-ritual-sum")?.textContent||""`);
+        await typeInto(ctx, ".ql-ritual-card .ql-ritual-hours input", "17");
+        await wait(ctx, `(R().querySelector(".ql-ritual-sum")?.textContent||"")!==${JSON.stringify(sum)}`, "the sum to follow");
+        await cardButton(ctx, /^(Finish|Fertig) /);
+        await wait(ctx, `!R().querySelector(".ql-ritual-card")`, "the card to close");
+        await wait(ctx, `[...P.store.reviews.keys()].some(k=>P.store.planHours(k))`, "plan_hours in a week note");
+        const r = await ev(ctx, `const q=P.store.activeQuests()[0]; const w=Object.keys(Object.fromEntries(P.store.reviews)).find(k=>P.store.planHours(k)); return {w, h:w&&P.store.planHours(w)[q.name]};`);
+        assert(r.w && r.h === 17, `plan_hours: ${JSON.stringify(r)}`);
+      } finally {
+        await restore(ctx, snap);
+      }
+    },
+  },
+  {
+    name: "ritual-check-in",
+    issue: "#22",
+    run: async (ctx) => {
+      const snap = await snapshot(ctx);
+      try {
+        // A quiet quest gets the card; without one the command says so in a notice.
+        await ev(ctx, `app.commands.executeCommandById("questlog:ritual-check-in"); await sleep(800);`);
+        const card = await ev(ctx, `return !!R()?.querySelector(".ql-ritual-card")`);
+        if (!card) {
+          assert(await ev(ctx, `return [...document.querySelectorAll(".notice")].some(n=>/check-in|Standortbestimmung/.test(n.textContent))`), "no card and no notice");
+          // No quiet quest in the demo: open the card for Garden the way the line would.
+          await tab(ctx, "home");
+          await ev(ctx, `app.workspace.getLeavesOfType("questlog-view")[0].view.openRitual({id:"check-in", day:P.today(), quest:"Garden"}); await sleep(500);`);
+          await wait(ctx, `R()?.querySelector(".ql-ritual-card .ql-radio-chip")`, "the check-in card");
+        }
+        const quest = await ev(ctx, `return app.workspace.getLeavesOfType("questlog-view")[0].view.state.ritual?.quest`);
+        await clickIn(ctx, ".ql-ritual-card .ql-radio-chip", /Keep|Behalten/);
+        await cardButton(ctx, /^(Save|Speichern) /);
+        await wait(ctx, `R().querySelector(".ql-ritual-note")`, "the quiet note");
+        const text = await ev(ctx, `return await app.vault.read(app.vault.getAbstractFileByPath(P.store.quest(${JSON.stringify(quest)}).path))`);
+        assert(/## (Check-ins|Standortbestimmung)/.test(text) && /keep|behalten/i.test(text), "no check-in line in the quest note");
+      } finally {
+        await restore(ctx, snap);
+      }
+    },
+  },
+  {
+    name: "ritual-cards-fit",
+    issue: "#18",
+    each: true,
+    run: async (ctx) => {
+      // Every card fits the pane; the close card stays open for the screenshot (no writes, nothing chosen).
+      for (const cmd of ["ritual-start-day", "ritual-plan-week", "ritual-close-day"]) {
+        await openRitual(ctx, cmd);
+        const r = await ev(ctx, String.raw`
+          const v=R(), body=v.querySelector(".ql-body"), c=v.querySelector(".ql-ritual-card");
+          return {overflow:body.scrollWidth-body.clientWidth, cardOver:c.scrollWidth-c.clientWidth, cards:v.querySelectorAll(".ql-ritual-card").length,
+            lines:v.querySelectorAll(".ql-ritual-line").length, warn:!!c.querySelector(".ql-warn")};`);
+        assert(r.cards === 1 && r.lines === 0, `${cmd}: ${JSON.stringify(r)}`);
+        assert(r.overflow <= 1 && r.cardOver <= 1, `${cmd} scrolls sideways: ${JSON.stringify(r)}`);
+        assert(!r.warn, `${cmd} uses a warning colour`);
+      }
+    },
+  },
+  // ---------------------------------------------------------------- review periods (#23–#26)
+  {
+    name: "review-periods",
+    issue: "#23",
+    each: true,
+    run: async (ctx) => {
+      await tab(ctx, "review");
+      const fit = () => ev(ctx, String.raw`
+        const v=R(), body=v.querySelector(".ql-body");
+        return {overflow:body.scrollWidth-body.clientWidth, title:v.querySelector(".ql-page-title, h2")?.textContent||"",
+          warn:!!v.querySelector(".ql-warn"), switch:!!v.querySelector(".ql-period-switch[aria-label]")};`);
+      const w = await fit();
+      assert(w.switch, "no period switch on the weekly review");
+      for (const [re, sel] of [
+        [/^(Month|Monat)/, ".ql-prows"],
+        [/^(Quarter|Quartal)/, ".ql-vcheck"],
+        [/^(Year|Jahr)/, ".ql-ownwords"],
+        [/^(Week|Woche)/, ".ql-review"],
+      ]) {
+        await clickIn(ctx, ".ql-period-switch .ql-seg-btn", re);
+        await wait(ctx, `R().querySelector(${JSON.stringify(sel)})`, `the ${re} review`);
+        const r = await fit();
+        assert(r.overflow <= 1, `${re} scrolls sideways by ${r.overflow}px`);
+        assert(!r.warn, `${re} uses a warning colour`);
+      }
+      // A month shows planned hours and last month next to each quest; the labels carry the numbers.
+      await clickIn(ctx, ".ql-period-switch .ql-seg-btn", /^(Month|Monat)/);
+      const m = await ev(ctx, String.raw`
+        const rows=[...R().querySelectorAll(".ql-prow")];
+        return {n:rows.length, labelled:rows.every(r=>r.querySelector(".ql-bar[role=img]")?.getAttribute("aria-label")),
+          last:rows.some(r=>/last month|Vormonat/.test(r.textContent)), trend:R().querySelectorAll(".ql-trend-col").length};`);
+      assert(m.n >= 3 && m.labelled && m.last, `month rows: ${JSON.stringify(m)}`);
+      assert(m.trend >= 4 && m.trend <= 6, `month trend has ${m.trend} weeks`);
+      // Previous / next keep the period.
+      await clickIn(ctx, ".ql-navgroup button", /Previous month|Vorheriger Monat/);
+      await wait(ctx, `R().querySelector(".ql-prows")`, "the previous month");
+      await clickIn(ctx, ".ql-navgroup button", /^(This month|Dieser Monat)/);
+    },
+  },
+  {
+    name: "review-period-notes",
+    issue: "#24",
+    run: async (ctx) => {
+      const snap = await snapshot(ctx);
+      try {
+        for (const [re, period] of [[/^(Month|Monat)/, "month"], [/^(Quarter|Quartal)/, "quarter"], [/^(Year|Jahr)/, "year"]]) {
+          await resetState(ctx);
+          await tab(ctx, "review");
+          await clickIn(ctx, ".ql-period-switch .ql-seg-btn", re);
+          await wait(ctx, `R().querySelector(".ql-answer")`, `the ${period} questions`);
+          const id = await ev(ctx, `const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1; return ${JSON.stringify(period)}==="month"?y+"-"+String(m).padStart(2,"0"):${JSON.stringify(period)}==="quarter"?y+"-Q"+Math.ceil(m/3):String(y);`);
+          const answer = `Smoke ${period} answer`;
+          await typeInto(ctx, ".ql-answer", answer);
+          await clickIn(ctx, ".ql-question-actions button.mod-cta", /Save|Speichern/);
+          await wait(ctx, `P.store.reviews.get(${JSON.stringify(id)})?.answers && Object.values(P.store.reviews.get(${JSON.stringify(id)}).answers).includes(${JSON.stringify(answer)})`, `the ${period} note`);
+          const r = await ev(ctx, `const rv=P.store.reviews.get(${JSON.stringify(id)}); return {path:rv.path, period:rv.period, text:await app.vault.read(app.vault.getAbstractFileByPath(rv.path))};`);
+          assert(r.path.endsWith(`/${id}.md`), `${period} note at ${r.path}`);
+          assert(r.period === period && new RegExp(`^period: ${period}$`, "m").test(r.text), `${period} frontmatter: ${r.text.slice(0, 200)}`);
+          assert(/^hours_total: /m.test(r.text) && r.text.includes(answer), `${period} note body: ${r.text}`);
+          // A fresh view fills the form from the note.
+          await resetState(ctx);
+          await tab(ctx, "review");
+          await clickIn(ctx, ".ql-period-switch .ql-seg-btn", re);
+          await wait(ctx, `[...R().querySelectorAll(".ql-answer")].some(t=>t.value===${JSON.stringify(answer)})`, `the saved ${period} answer`);
+        }
+      } finally {
+        await restore(ctx, snap);
+      }
+    },
+  },
+  {
+    name: "review-quarter-decisions",
+    issue: "#25",
+    run: async (ctx) => {
+      const snap = await snapshot(ctx);
+      try {
+        await tab(ctx, "review");
+        await clickIn(ctx, ".ql-period-switch .ql-seg-btn", /^(Quarter|Quartal)/);
+        await wait(ctx, `R().querySelector(".ql-decide-row")`, "the quest decisions");
+        // Vision check: "Needs an update" offers the vision dialog, nothing opens by itself.
+        await ev(ctx, `[...R().querySelectorAll(".ql-vcheck .ql-radio-chip input")][1].click(); await sleep(300);`);
+        await wait(ctx, `R().querySelector(".ql-vcheck-edit button")`, "the Edit vision button");
+        assert((await modalCount(ctx)) === 0, "a dialog opened by itself");
+        const r = await ev(ctx, String.raw`
+          const fs=[...R().querySelectorAll("fieldset.ql-decide-row")].find(f=>f.querySelector("legend").textContent.includes("Travel book"));
+          if (!fs) return {err:"no Travel book row"};
+          const labelled=[...fs.querySelectorAll("input")].every(i=>i.type==="radio"?i.closest("label"):R().querySelector('label[for="'+i.id+'"]'));
+          fs.querySelector('input[type=radio][value=pause]').click();
+          const num=fs.querySelector('input[type=number]'); num.focus(); num.value="2"; num.dispatchEvent(new Event("input",{bubbles:true})); num.blur();
+          await sleep(200);
+          return {labelled, group:fs.querySelector("[role=radiogroup]")?.getAttribute("aria-label")||""};`);
+        assert(!r.err && r.labelled && r.group, `decision row: ${JSON.stringify(r)}`);
+        await clickIn(ctx, ".ql-decide .ql-question-actions button", /Apply changes|Änderungen übernehmen/);
+        await wait(ctx, `P.store.quest("Travel book").status==="paused" && P.store.quest("Travel book").weeklyHours===2`, "the decision in the quest");
+        const after = await ev(ctx, String.raw`
+          const t=await app.vault.read(app.vault.getAbstractFileByPath(P.store.quest("Travel book").path));
+          return {status:/^status: paused$/m.test(t), hours:/^weekly_hours: 2$/m.test(t), live:R().querySelector(".ql-decide-status")?.textContent||"",
+            others:P.store.quests.filter(q=>q.name!=="Travel book"&&q.kind==="quest").map(q=>q.status).join()};`);
+        assert(after.status && after.hours, `quest note: ${JSON.stringify(after)}`);
+        assert(/1/.test(after.live), `no result line: ${after.live}`);
+        // The paused quest now offers Resume.
+        await wait(ctx, `[...R().querySelectorAll("fieldset.ql-decide-row")].find(f=>f.textContent.includes("Travel book"))?.querySelector("input[value=resume]")`, "Resume for the paused quest");
+      } finally {
+        await restore(ctx, snap);
+      }
+    },
+  },
+  {
+    name: "review-year",
+    issue: "#26",
+    each: true,
+    run: async (ctx) => {
+      await tab(ctx, "review");
+      await clickIn(ctx, ".ql-period-switch .ql-seg-btn", /^(Year|Jahr)/);
+      await wait(ctx, `R().querySelector(".ql-ystories, .ql-empty")`, "the year");
+      const r = await ev(ctx, String.raw`
+        const v=R(), body=v.querySelector(".ql-body");
+        const table=v.querySelector(".ql-ytable");
+        return {stories:v.querySelectorAll(".ql-ystory").length, open:v.querySelectorAll(".ql-ystory-open").length,
+          bars:table?[...table.querySelectorAll(".ql-bar")].every(b=>/ Q[1-4]: /.test(b.getAttribute("aria-label")||"")):true,
+          select:!!v.querySelector(".ql-ownwords select[id]") && !!v.querySelector('.ql-ownwords label[for]'),
+          expanded:[...v.querySelectorAll(".ql-ownwords-toggle")].filter(b=>b.getAttribute("aria-expanded")==="true").length,
+          toggles:v.querySelectorAll(".ql-ownwords-toggle").length,
+          overflow:body.scrollWidth-body.clientWidth, warn:!!v.querySelector(".ql-warn")};`);
+      assert(r.stories >= 1 && r.open >= 1, `stories: ${JSON.stringify(r)}`);
+      assert(r.bars, "a quarter bar has no label");
+      assert(!r.toggles || (r.select && r.expanded === 1), `own words: ${JSON.stringify(r)}`);
+      assert(r.overflow <= 1, `page scrolls sideways by ${r.overflow}px`);
+      assert(!r.warn, "a warning colour is used");
+      await clickIn(ctx, ".ql-ystory-open", /Travel book/);
+      await wait(ctx, `R().querySelector(".ql-story-week")`, "the story from the year review");
+    },
+  },
+  // ---------------------------------------------------------------- block 7: plan fit, day view, phone (#27–#29)
+  {
+    name: "plan-board-fit",
+    issue: "#27",
+    timeout: 60000,
+    run: async (ctx) => {
+      // Pane widths of about 1100, 1000 and 700 px (the ribbon takes the rest of the window).
+      const out = [];
+      try {
+        for (const width of [1150, 1050, 750]) {
+          await setViewport(ctx.c, { width, height: 800 });
+          await ev(ctx, `app.workspace.leftSplit.collapse(); app.workspace.rightSplit.collapse(); await sleep(300);`);
+          await tab(ctx, "plan");
+          const r = await ev(ctx, String.raw`
+            const v=R(), body=v.querySelector(".ql-body"), board=v.querySelector(".ql-board"), rail=v.querySelector(".ql-backlog-rail");
+            const today=board.querySelector(".ql-col.is-today"), br=board.getBoundingClientRect();
+            const tr=today?.getBoundingClientRect();
+            return {pane:body.clientWidth, overflow:board.scrollWidth-board.clientWidth, page:body.scrollWidth-body.clientWidth,
+              rail:rail.getBoundingClientRect().width>0, todayIn:!tr||(tr.left>=br.left-1&&tr.left<br.right-40)};`);
+          out.push(r);
+          assert(r.page <= 1, `page scrolls sideways at ${r.pane}px: ${JSON.stringify(r)}`);
+          if (r.pane >= 1050) assert(r.overflow <= 1 && !r.rail, `week does not fit at ${r.pane}px: ${JSON.stringify(r)}`);
+          else if (r.pane >= 900) assert(r.overflow <= 1 && r.rail, `rail missing at ${r.pane}px: ${JSON.stringify(r)}`);
+          else assert(r.todayIn, `today is not in view at ${r.pane}px: ${JSON.stringify(r)}`);
+        }
+        // The rail opens the backlog as an overlay and Escape closes it again.
+        await setViewport(ctx.c, { width: 1050, height: 800 });
+        await ev(ctx, `app.workspace.leftSplit.collapse(); await sleep(300);`);
+        await tab(ctx, "plan");
+        await clickIn(ctx, ".ql-backlog-rail");
+        const open = await ev(ctx, `const c=R().querySelector(".ql-col-backlog"); return {open:c.classList.contains("is-open"), focus:document.activeElement?.classList.contains("ql-search-input")}`);
+        assert(open.open && open.focus, `overlay: ${JSON.stringify(open)}`);
+        await ctx.shot("plan-board-fit-overlay");
+        await ev(ctx, `document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})); await sleep(200);`);
+        const closed = await ev(ctx, `return !R().querySelector(".ql-col-backlog").classList.contains("is-open") && document.activeElement?.classList.contains("ql-backlog-rail")`);
+        assert(closed, "Escape does not close the overlay back to the rail");
+      } finally {
+        await setViewport(ctx.c, { width: ctx.size.width, height: ctx.size.height });
+      }
+    },
+  },
+  {
+    name: "plan-backlog-search",
+    issue: "#27",
+    each: true,
+    run: async (ctx) => {
+      const snap = await snapshot(ctx);
+      try {
+        const long = "Collect every source for the Lisbon chapter: the tram timetable of 1931, the harbour letters, the café menus, the two interviews and the photographs from the archive in Belém";
+        await ev(ctx, `const q=P.store.quests.find(x=>x.name==="Travel book"); await P.store.addTaskTo(q, ${JSON.stringify(long)}, null, "bottom"); await sleep(600);`);
+        await tab(ctx, "plan");
+        await ev(ctx, `const r=R().querySelector(".ql-backlog-rail"); if (r.getBoundingClientRect().width>0) { r.click(); await sleep(300); }`);
+        // A long backlog is folded on narrow panes; unfold it first.
+        await ev(ctx, `const f=R().querySelector(".ql-backlog-fold[aria-expanded=false]"); if (f) { f.click(); await sleep(400); }`);
+        // Search: typing keeps the focus and hides rows only.
+        const r = await ev(ctx, String.raw`
+          const v=R(), s=v.querySelector(".ql-search-input"); s.focus();
+          const total=v.querySelectorAll(".ql-col-backlog .ql-task").length;
+          s.value="lisbon"; s.dispatchEvent(new Event("input",{bubbles:true})); await sleep(300);
+          const shown=[...v.querySelectorAll(".ql-col-backlog .ql-task")].filter(e=>!e.hidden).length;
+          return {total, shown, focus:document.activeElement===s, count:v.querySelector(".ql-col-backlog .ql-col-meta").textContent};`);
+        assert(r.focus, "the search field lost its focus while typing");
+        assert(r.shown >= 1 && r.shown < r.total && /\d+ (of|von) \d+/.test(r.count), `search: ${JSON.stringify(r)}`);
+        // Clear, then a quest chip.
+        await clickIn(ctx, ".ql-search-clear");
+        await clickIn(ctx, ".ql-backlog-chip", /Travel book/);
+        const c = await ev(ctx, String.raw`
+          const v=R(); const chip=[...v.querySelectorAll(".ql-backlog-chip")].find(b=>/Travel book/.test(b.textContent));
+          const heads=[...v.querySelectorAll(".ql-col-backlog .ql-group-head")].filter(h=>!h.hidden).map(h=>h.textContent);
+          return {pressed:chip.getAttribute("aria-pressed"), heads, count:v.querySelector(".ql-col-backlog .ql-col-meta").textContent};`);
+        assert(c.pressed === "true" && c.heads.length === 1 && /of|von/.test(c.count), `chip: ${JSON.stringify(c)}`);
+        // The long card is clamped and opens with its button.
+        const e = await ev(ctx, String.raw`
+          await sleep(200);
+          const row=[...R().querySelectorAll(".ql-col-backlog .ql-task")].find(x=>/tram timetable/.test(x.textContent));
+          const text=row.querySelector(".ql-task-text"), btn=row.querySelector(".ql-task-expand");
+          const before=text.clientHeight; const visible=!btn.hidden; btn.click(); await sleep(100);
+          return {visible, grew:text.clientHeight>before, expanded:btn.getAttribute("aria-expanded")};`);
+        assert(e.visible && e.grew && e.expanded === "true", `long card: ${JSON.stringify(e)}`);
+        await clickIn(ctx, ".ql-backlog-chip", /^(All|Alle)/);
+      } finally {
+        await ev(ctx, `const v=app.workspace.getLeavesOfType("questlog-view")[0]?.view; if (v) { v.state.backlogQuery=""; v.state.backlogQuest=null; v.state.backlogOpen=false; }`);
+        await restore(ctx, snap);
+      }
+    },
+  },
+  {
+    name: "calendar-day-view",
+    issue: "calendar",
+    each: true,
+    run: async (ctx) => {
+      try {
+        await ev(ctx, `P.settings.calendarView="auto"; await P.saveSettings();`);
+        await tab(ctx, "calendar");
+        const auto = await ev(ctx, `return {day:!!R().querySelector(".ql-cal-day"), narrow:R().classList.contains("ql-w-narrow")}`);
+        assert(auto.day === auto.narrow, `auto layout: ${JSON.stringify(auto)}`);
+        await clickIn(ctx, ".ql-cal-switch .ql-seg-btn", /^(Day|Tag)/);
+        const d = await ev(ctx, String.raw`
+          const v=R(), body=v.querySelector(".ql-body");
+          return {day:!!v.querySelector(".ql-cal-day"), strip:v.querySelectorAll(".ql-cal-strip-day").length,
+            pressed:v.querySelectorAll('.ql-cal-strip-day[aria-pressed="true"]').length, cols:v.querySelectorAll(".ql-tl-col, .ql-tl-day").length,
+            list:!!v.querySelector(".ql-cal-daylist"), overflow:body.scrollWidth-body.clientWidth, saved:P.settings.calendarView};`);
+        assert(d.day && d.strip === 7 && d.pressed === 1 && d.list && d.saved === "day", `day view: ${JSON.stringify(d)}`);
+        assert(d.overflow <= 1, `day view scrolls sideways by ${d.overflow}px`);
+        // Another day of the strip, then the arrows step a single day.
+        const before = await ev(ctx, `return R().querySelector(".ql-page-head h2, .ql-page-title")?.textContent`);
+        await ev(ctx, `const b=[...R().querySelectorAll('.ql-cal-strip-day[aria-pressed="false"]')][0]; b.click(); await sleep(400);`);
+        const after = await ev(ctx, `return R().querySelector(".ql-page-head h2, .ql-page-title")?.textContent`);
+        assert(before !== after, "the strip does not change the day");
+        // A logged session shows in the list and opens its dialog.
+        const snap = await snapshot(ctx);
+        try {
+          await ev(ctx, String.raw`
+            const v=app.workspace.getLeavesOfType("questlog-view")[0].view, day=v.state.calendarDay;
+            const q=P.store.quests.find(x=>x.name==="Travel book");
+            await P.store.addSession({day, start:9*60, end:10*60+15, quest:q.name, taskText:"", taskId:"", note:"smoke"}); await sleep(600);`);
+          await wait(ctx, `R().querySelector(".ql-cal-session")`, "the session in the day list");
+          await clickIn(ctx, ".ql-cal-session");
+          assert((await modalCount(ctx)) === 1, "the session dialog did not open");
+        } finally {
+          await resetState(ctx);
+          await restore(ctx, snap);
+        }
+        await tab(ctx, "calendar");
+        await clickIn(ctx, ".ql-cal-switch .ql-seg-btn", /^(Week|Woche)/);
+        const w = await ev(ctx, `return {day:!!R().querySelector(".ql-cal-day"), saved:P.settings.calendarView}`);
+        assert(!w.day && w.saved === "week", `week view: ${JSON.stringify(w)}`);
+      } finally {
+        await ev(ctx, `P.settings.calendarView="auto"; await P.saveSettings();`);
+      }
+    },
+  },
+  {
+    name: "capture-bar",
+    issue: "#28",
+    each: true,
+    run: async (ctx) => {
+      await tab(ctx, "home");
+      const r = await ev(ctx, String.raw`
+        const v=R(), bar=v.querySelector(".ql-capturebar");
+        if (!bar) return {bar:false};
+        // Right above Obsidian's floating phone navbar, or at the bottom of the view without one.
+        const nb=document.querySelector(".mobile-navbar")?.getBoundingClientRect();
+        const b=bar.getBoundingClientRect(), floor=nb&&nb.height?nb.top:v.getBoundingClientRect().bottom;
+        return {bar:true, buttons:bar.querySelectorAll("button").length, gap:Math.round(floor-b.bottom),
+          small:[...bar.querySelectorAll("button")].filter(x=>x.getBoundingClientRect().height<44).length};`);
+      if (!ctx.size.phone) {
+        assert(!r.bar, "the capture bar shows outside a phone");
+        return;
+      }
+      assert(r.bar && r.buttons === 3 && r.small === 0, `capture bar: ${JSON.stringify(r)}`);
+      assert(r.gap >= 0 && r.gap <= 16, `the bar is not at the bottom: ${JSON.stringify(r)}`);
+      await ctx.shot("capture-bar-home");
+      // Add opens the box with the quest row; picking a quest changes where the task goes.
+      await clickIn(ctx, ".ql-capture-btn.is-add");
+      await wait(ctx, `document.querySelector(".ql-sb-questbtn")`, "the quest row");
+      const k = await ev(ctx, `const i=document.querySelector(".prompt-input"); return {hint:i.getAttribute("enterkeyhint"), cap:i.getAttribute("autocapitalize")}`);
+      assert(k.hint === "go" && k.cap === "sentences", `keyboard hints: ${JSON.stringify(k)}`);
+      await ev(ctx, `document.querySelector(".ql-sb-questbtn").click(); await sleep(400);`);
+      assert((await modalCount(ctx)) === 2, "the quest picker did not open");
+      await ev(ctx, String.raw`const ms=document.querySelectorAll(".modal-container"); const it=[...ms[ms.length-1].querySelectorAll(".suggestion-item")].find(x=>/Garden/.test(x.textContent)); it.click(); await sleep(400);`);
+      const label = await ev(ctx, `return document.querySelector(".ql-sb-questbtn").textContent`);
+      assert(/Garden/.test(label), `quest row after picking: ${label}`);
+      await ev(ctx, `const i=document.querySelector(".prompt-input"); i.value="Mulch the beds"; i.dispatchEvent(new Event("input")); await sleep(300);`);
+      const first = await ev(ctx, `return document.querySelector(".suggestion-item")?.textContent`);
+      assert(/Garden/.test(first ?? ""), `first row after picking: ${first}`);
+      await ctx.shot("capture-bar-startbox");
+      await resetState(ctx);
+      // Not on Focus, and not while a timer runs.
+      await tab(ctx, "focus");
+      assert(!(await ev(ctx, `return !!R().querySelector(".ql-capturebar")`)), "the capture bar shows on Focus");
+    },
+  },
+  {
+    name: "phone-fit",
+    issue: "#29",
+    each: true,
+    shot: false,
+    timeout: 90000,
+    run: async (ctx) => {
+      if (!ctx.size.phone) return;
+      const bad = [];
+      try {
+        for (const width of [420, 320]) {
+          await setViewport(ctx.c, { width, height: 800 });
+          for (const id of TABS) {
+            await tab(ctx, id);
+            const r = await ev(ctx, String.raw`
+              const v=R(), body=v.querySelector(".ql-body");
+              const vis=(e)=>{const b=e.getBoundingClientRect(); return b.width>0&&b.height>0&&!e.closest("[hidden]")};
+              const name=(e)=>(e.className||e.tagName).toString().split(" ")[0]+":"+(e.getAttribute("aria-label")||e.textContent).trim().slice(0,24);
+              const small=[...v.querySelectorAll("button, [role=button], select, input[type=checkbox]")].filter(vis)
+                .filter(e=>{const b=(e.matches("input")&&e.closest("label")||e).getBoundingClientRect(); return b.height<43.5 || b.width<43.5}).map(name);
+              const tiny=[...v.querySelectorAll("input:not([type=checkbox]):not([type=radio]), textarea, select")].filter(vis)
+                .filter(e=>parseFloat(getComputedStyle(e).fontSize)<16).map(name);
+              const edge=body.getBoundingClientRect().right+1;
+              const wide=[...body.querySelectorAll("*")].filter(e=>vis(e)&&e.getBoundingClientRect().right>edge&&!e.closest(".ql-ytable-wrap,.ql-cal-strip")).slice(-2).map(name);
+              return {overflow:body.scrollWidth-body.clientWidth, wide, small:[...new Set(small)], tiny:[...new Set(tiny)]};`);
+            if (r.overflow > 1) bad.push(`${id}@${width}: scrolls sideways by ${r.overflow}px (${r.wide.join(", ")})`);
+            if (r.small.length) bad.push(`${id}@${width}: small targets ${r.small.slice(0, 8).join(", ")}`);
+            if (r.tiny.length) bad.push(`${id}@${width}: text under 16px ${r.tiny.slice(0, 5).join(", ")}`);
+          }
+          await ctx.shot(`phone-fit-${width}`);
+        }
+      } finally {
+        await setViewport(ctx.c, { width: ctx.size.width, height: ctx.size.height });
+      }
+      assert(!bad.length, bad.join(" | "));
+    },
   },
 ];

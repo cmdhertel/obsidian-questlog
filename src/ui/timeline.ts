@@ -1,7 +1,8 @@
 // Time grid for one or more days, filled from logged sessions plus the running timer.
 // Used by Calendar (week or single day) and the Home sidebar (today).
 import { fmtClock, fmtDuration, isoDay, minutesOfDay, parseDay } from "../data/dates";
-import { findGaps, gapSuggestions, hasFreeStretch, runningSpan, type GapItem } from "../data/gaps";
+import { findGaps, gapSuggestions, hasFreeStretch, runningSpan, type Gap, type GapItem } from "../data/gaps";
+import type QuestlogPlugin from "../main";
 import { dur, layoutLanes, totalMinutes } from "../data/stats";
 import type { Session } from "../data/model";
 import { workTitle } from "../data/timerlog";
@@ -129,18 +130,30 @@ function block(col: HTMLElement, ctx: Ctx, s: Session, top: number, bottom: numb
 }
 
 /** Unlogged stretches (or one "Nothing logged" row) of today or yesterday, drawn under the sessions. */
-function drawGaps(col: HTMLElement, ctx: Ctx, day: string, daySessions: Session[], y: (min: number) => number): void {
-  const { store, plugin, today } = ctx;
+/** What the gap finder needs for a day: calendar window, now (today only), logged spans incl. a running timer, breaks. */
+function gapFrame(plugin: QuestlogPlugin, day: string, daySessions: Session[]) {
   const winFrom = plugin.settings.calendarStartHour * 60;
   const winTo = plugin.settings.calendarEndHour * 60;
   const nowMs = Date.now();
-  const now = day === today ? minutesOfDay(new Date(nowMs)) : undefined;
-  if (now !== undefined && now < winFrom) return;
+  const now = day === isoDay(new Date(nowMs)) ? minutesOfDay(new Date(nowMs)) : undefined;
   const running = plugin.settings.timer;
   const run = running ? runningSpan(running.start, nowMs, day) : null;
   const covered = [...daySessions.map((s) => ({ start: s.start, end: s.end })), ...(run ? [run] : [])];
-  const breaks = store.breaksOf(day);
-  const items = () => suggestionsFor(ctx, day);
+  return { winFrom, winTo, now, covered, breaks: plugin.store.breaksOf(day) };
+}
+
+/** Unlogged stretches of a day within calendar hours, as the timeline shows them. Empty when nothing is logged. */
+export function dayGaps(plugin: QuestlogPlugin, day: string): Gap[] {
+  const f = gapFrame(plugin, day, plugin.store.sessions([day]));
+  if ((f.now !== undefined && f.now < f.winFrom) || !f.covered.length) return [];
+  return findGaps({ covered: f.covered, from: f.winFrom, to: f.winTo, now: f.now, breaks: f.breaks });
+}
+
+function drawGaps(col: HTMLElement, ctx: Ctx, day: string, daySessions: Session[], y: (min: number) => number): void {
+  const { plugin } = ctx;
+  const { winFrom, winTo, now, covered, breaks } = gapFrame(plugin, day, daySessions);
+  if (now !== undefined && now < winFrom) return;
+  const items = () => gapSuggestionsFor(ctx, day);
   const add = (start: number, end: number, cls: string, text: string, breakSpan?: { start: number; end: number }) => {
     const mins = end - start;
     const top = y(start);
@@ -178,7 +191,8 @@ function drawGaps(col: HTMLElement, ctx: Ctx, day: string, daySessions: Session[
   }
 }
 
-function suggestionsFor(ctx: Ctx, day: string): GapItem[] {
+/** Fill chips for a gap of `day`: done and planned tasks of that day, and the last work. */
+export function gapSuggestionsFor(ctx: Ctx, day: string): GapItem[] {
   const { store, plugin } = ctx;
   const item = (x: { id: string; text: string; questPath: string } & Parameters<typeof store.questOf>[0]): GapItem | null => {
     const q = store.questOf(x);

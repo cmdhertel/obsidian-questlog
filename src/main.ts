@@ -8,7 +8,8 @@ import { DEFAULT_SETTINGS, QuestlogSettingTab, mergeSettings, type QuestlogSetti
 import { Timer } from "./timer";
 import { workTitle } from "./data/timerlog";
 import { act, questName } from "./ui/components";
-import { QuestlogView, VIEW_TYPE } from "./ui/view";
+import { QuestlogView, VIEW_TYPE, type OpenRitual } from "./ui/view";
+import { closeDayTarget, ritualTarget } from "./ui/ritual";
 import { StartBox, continueTitle } from "./ui/startbox";
 import { t } from "./i18n";
 
@@ -110,6 +111,30 @@ export default class QuestlogPlugin extends Plugin {
         const view = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
         if (view instanceof QuestlogView) view.setZen(on);
       },
+    });
+    // Rituals (#18): no hotkeys; each opens Home and the card, whatever the time and dismissals.
+    const ritual = (id: string, name: string, target: () => Omit<OpenRitual, "step"> | null) =>
+      this.addCommand({
+        id,
+        name,
+        callback: async () => {
+          const r = target();
+          if (!r) return;
+          await this.openView("home");
+          const view = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
+          if (view instanceof QuestlogView) view.openRitual(r);
+        },
+      });
+    ritual("ritual-start-day", t("cmd.ritualStartDay"), () => ({ id: "start-day", day: this.today() }));
+    ritual("ritual-close-day", t("cmd.ritualCloseDay"), () => {
+      const day = closeDayTarget(this);
+      return { id: day < this.today() ? "close-yesterday" : "close-day", day };
+    });
+    ritual("ritual-plan-week", t("cmd.ritualPlanWeek"), () => ({ id: "plan-week", day: this.today() }));
+    ritual("ritual-check-in", t("cmd.ritualCheckIn"), () => {
+      const r = ritualTarget(this, "check-in", this.today());
+      if (!r) new Notice(t("ritual.noCheckin"));
+      return r;
     });
   }
 

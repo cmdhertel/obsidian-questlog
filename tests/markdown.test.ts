@@ -135,3 +135,37 @@ describe("answers", () => {
     expect(w).toBe("## Reflection\n\n### Q\nnew\n\n## After\nkeep\n");
   });
 });
+
+describe("section text", () => {
+  const H = ["Closing line", "Tagesfazit"];
+  const DAY = "---\nplan: [a]\n---\n## Sessions\n- 10:30–12:00 Draft · [[Travel book]] 🆔 def456\n";
+
+  it("reads English and German headings", () => {
+    expect(md.readSectionText(`${DAY}\n## Closing line\nFinished it.\n`, H)).toBe("Finished it.");
+    expect(md.readSectionText(`## Tagesfazit\nGeschafft.\n\n## Sessions\n- x\n`, H)).toBe("Geschafft.");
+    expect(md.readSectionText(DAY, H)).toBe("");
+  });
+
+  it("appends a missing section at the end, other bytes untouched", () => {
+    expect(md.writeSectionText(DAY, "Closing line", "Finished it.", H)).toBe(`${DAY}\n## Closing line\nFinished it.\n`);
+    expect(md.writeSectionText("---\nplan: []\n---\n", "Closing line", "One.", H)).toBe("---\nplan: []\n---\n\n## Closing line\nOne.\n");
+  });
+
+  it("replaces in place and keeps a German heading", () => {
+    const de = `## Tagesfazit\nAlt.\n\n## Sessions\n- x\n`;
+    expect(md.writeSectionText(de, "Closing line", "Neu.", H)).toBe(`## Tagesfazit\nNeu.\n\n## Sessions\n- x\n`);
+    const en = `${DAY}\n## Closing line\nOld.\n`;
+    expect(md.writeSectionText(en, "Closing line", "New.", H)).toBe(`${DAY}\n## Closing line\nNew.\n`);
+  });
+
+  it("removes the section on empty text", () => {
+    expect(md.writeSectionText(`${DAY}\n## Closing line\nOld.\n`, "Closing line", "", H)).toBe(DAY);
+    expect(md.writeSectionText(`## Tagesfazit\nAlt.\n\n## Sessions\n- x\n`, "Closing line", " ", H)).toBe(`## Sessions\n- x\n`);
+    expect(md.writeSectionText(DAY, "Closing line", "", H)).toBe(DAY);
+  });
+
+  it("keeps CRLF", () => {
+    const crlf = "## Sessions\r\n- x\r\n\r\n## Closing line\r\nOld.\r\n";
+    expect(md.writeSectionText(crlf, "Closing line", "New.", H)).toBe("## Sessions\r\n- x\r\n\r\n## Closing line\r\nNew.\r\n");
+  });
+});

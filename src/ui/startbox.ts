@@ -1,12 +1,12 @@
 // Start box: one input that finds an open task, or creates one in the right quest and starts it.
-import { Notice, Platform, SuggestModal, setIcon } from "obsidian";
+import { type App, Notice, Platform, SuggestModal, setIcon } from "obsidian";
 import type QuestlogPlugin from "../main";
 import { isoDay } from "../data/dates";
 import type { ContinueTarget } from "../data/lastwork";
 import type { Quest, Task } from "../data/model";
 import { buildRows, type StartRow, type TaskEntry } from "../data/startbox";
 import { t } from "../i18n";
-import { questName } from "./components";
+import { dot, questName } from "./components";
 
 export type StartMode = "start" | "add";
 
@@ -14,6 +14,32 @@ export type StartMode = "start" | "add";
 export function continueTitle(target: ContinueTarget): string {
   if (target.kind === "task") return target.task.text;
   return target.kind === "quest" ? questName(target.quest) : "";
+}
+
+/** The mobile app, or a desktop app emulating it (the smoke test does). */
+export function onMobile(doc: Document): boolean {
+  return Platform.isMobile || doc.body.hasClass("is-mobile");
+}
+
+/** A plain list of quests to pick the Start box destination on a phone. */
+class QuestPicker extends SuggestModal<Quest> {
+  constructor(app: App, private quests: Quest[], private onPick: (q: Quest | null) => void) {
+    super(app);
+    this.setPlaceholder(t("startbox.pickQuest"));
+  }
+  getSuggestions(query: string): Quest[] {
+    const q = query.trim().toLowerCase();
+    return this.quests.filter((x) => !q || questName(x).toLowerCase().includes(q));
+  }
+  renderSuggestion(q: Quest, el: HTMLElement): void {
+    el.addClass("ql-sb-row");
+    el.style.setProperty("--ql-color", q.color);
+    dot(el, q.color || "var(--text-faint)");
+    el.createSpan({ cls: "ql-sb-text", text: questName(q) });
+  }
+  onChooseSuggestion(q: Quest): void {
+    this.onPick(q);
+  }
 }
 
 /** True while an input method is composing; Enter then confirms the composition, not a row. */
@@ -29,6 +55,9 @@ export class StartBox extends SuggestModal<StartRow> {
   private readonly plannedIds: string[];
   private readonly otherNames = ["Other", t("other.name")];
   private readonly lastQuest: Quest | null;
+  /** Quest picked with the phone quest row (#28); null = the usual destination. */
+  private chosen: Quest | null = null;
+  private questBtn: HTMLButtonElement | null = null;
   /** Set while a choice is being carried out, so a double Enter cannot create two tasks. */
   private busy = false;
 
@@ -42,6 +71,9 @@ export class StartBox extends SuggestModal<StartRow> {
     this.lastQuest = last && store.isWorkable(last) ? last : null;
 
     this.setPlaceholder(t("startbox.placeholder"));
+    // Phone keyboards: an action key that says what Enter does, and a capital first letter.
+    this.inputEl.setAttr("enterkeyhint", "go");
+    this.inputEl.setAttr("autocapitalize", "sentences");
     this.emptyStateText = t("startbox.empty");
     if (!Platform.isMobile) {
       const start = { command: "↵", purpose: t("startbox.hintStart") };
@@ -56,6 +88,41 @@ export class StartBox extends SuggestModal<StartRow> {
     });
   }
 
+  onOpen(): void {
+    void super.onOpen();
+    if (!onMobile(this.modalEl.doc)) return;
+    // On a phone "#quest" is awkward to type: a row under the field shows where new tasks go and changes it.
+    const row = createDiv({ cls: "ql-sb-questrow" });
+    this.inputEl.parentElement?.after(row);
+    this.questBtn = row.createEl("button", { cls: "ql-sb-questbtn" });
+    this.questBtn.onclick = () => {
+      new QuestPicker(this.app, this.quests, (q) => {
+        this.chosen = q;
+        this.paintQuest();
+        this.inputEl.focus();
+        this.inputEl.dispatchEvent(new Event("input"));
+      }).open();
+    };
+    this.paintQuest();
+  }
+
+  /** The destination without a typed token: the picked quest, the last used one, else Other. */
+  private destination(): Quest | null {
+    return this.chosen ?? this.lastQuest ?? this.quests.find((q) => q.kind === "other") ?? null;
+  }
+
+  private paintQuest(): void {
+    const b = this.questBtn;
+    const dest = this.destination();
+    if (!b || !dest) return;
+    b.empty();
+    b.style.setProperty("--ql-color", dest.color || "var(--text-faint)");
+    dot(b, dest.color || "var(--text-faint)");
+    b.createSpan({ text: t("startbox.quest", { quest: questName(dest) }) });
+    setIcon(b.createSpan({ cls: "ql-sb-questchev", attr: { "aria-hidden": "true" } }), "chevron-down");
+    b.setAttr("aria-label", t("startbox.questChange", { quest: questName(dest) }));
+  }
+
   getSuggestions(query: string): StartRow[] {
     return buildRows({
       input: query,
@@ -65,6 +132,7 @@ export class StartBox extends SuggestModal<StartRow> {
       entries: this.entries,
       plannedIds: this.plannedIds,
       lastQuest: this.lastQuest,
+      chosenQuest: this.chosen,
     });
   }
 
@@ -117,6 +185,8 @@ export class StartBox extends SuggestModal<StartRow> {
     const id = await store.addTaskTo(row.quest, row.text, this.today, addOnly ? "bottom" : "top");
     const task = store.task(id);
     if (!addOnly && task) await timer.start(task);
+    // On a phone the box closes over a view that may not show today: say where the task went.
+    else if (addOnly && onMobile(this.modalEl.doc)) new Notice(t("startbox.addedToday", { quest: questName(row.quest) }));
   }
 
   /** Plan for today unless it already is (also when carried over), so its place in the plan stays. */

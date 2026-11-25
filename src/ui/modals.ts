@@ -14,6 +14,7 @@ export class ConfirmModal extends Modal {
     super(app);
   }
   onOpen(): void {
+    this.modalEl.addClass("ql-modal");
     this.contentEl.createEl("p", { text: this.message });
     new Setting(this.contentEl)
       .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))
@@ -34,6 +35,7 @@ export class TextModal extends Modal {
     super(app);
   }
   onOpen(): void {
+    this.modalEl.addClass("ql-modal");
     this.setTitle(this.heading);
     let v = this.value;
     const submit = () => {
@@ -217,6 +219,7 @@ export class SessionModal extends Modal {
     super(plugin.app);
   }
   onOpen(): void {
+    this.modalEl.addClass("ql-modal");
     const store = this.plugin.store;
     this.setTitle(this.existing ? t("session.edit") : t("session.add"));
     const quests = [...store.quests.filter((q) => q.status !== "done" || q.name === this.init.quest), store.other];
@@ -377,6 +380,7 @@ export class StartTimeModal extends Modal {
   }
 
   onOpen(): void {
+    this.modalEl.addClass("ql-modal");
     const run = this.plugin.settings.timer;
     if (!run) return this.close();
     const runStart = run.start;
@@ -445,5 +449,118 @@ export class TaskSuggestModal extends FuzzySuggestModal<Task> {
   }
   onChooseItem(task: Task): void {
     this.onPick(task);
+  }
+}
+
+/**
+ * Add or rename a stage, or set only its target date (`name: null`).
+ * Saves first and closes after: when writing fails, the dialog stays open with the input.
+ */
+export class StageModal extends Modal {
+  constructor(
+    app: App,
+    private opts: { heading: string; name: string | null; target: string | null; withTarget: boolean; onSubmit: (name: string, target: string | null) => Promise<unknown>; onCancel?: () => void },
+  ) {
+    super(app);
+  }
+  private done = false;
+  onOpen(): void {
+    const o = this.opts;
+    this.setTitle(o.heading);
+    this.modalEl.addClass("ql-modal");
+    let name = o.name ?? "";
+    let target = o.target ?? "";
+    let busy = false;
+    const submit = act(async () => {
+      if (busy) return;
+      if (o.name !== null && !name.trim()) {
+        new Notice(t("stage.nameEmpty"));
+        return;
+      }
+      busy = true;
+      try {
+        await o.onSubmit(name.trim(), /^\d{4}-\d{2}-\d{2}$/.test(target) ? target : null);
+        this.done = true;
+        this.close();
+      } finally {
+        busy = false;
+      }
+    });
+    const enter = (el: HTMLInputElement) => {
+      el.onkeydown = (e) => {
+        if (e.key === "Enter" && !e.isComposing) {
+          e.preventDefault();
+          submit();
+        }
+      };
+    };
+    if (o.name !== null) {
+      new Setting(this.contentEl).setName(t("stage.name")).addText((x) => {
+        x.setPlaceholder(t("stage.namePh")).setValue(name).onChange((s) => (name = s));
+        x.inputEl.addClass("ql-wide");
+        enter(x.inputEl);
+        window.setTimeout(() => x.inputEl.select(), 0);
+      });
+    }
+    if (o.withTarget) {
+      new Setting(this.contentEl)
+        .setName(t("stage.target"))
+        .setDesc(t("stage.targetDesc"))
+        .addText((x) => {
+          x.inputEl.type = "date";
+          x.setValue(target).onChange((s) => (target = s));
+          enter(x.inputEl);
+          if (o.name === null) window.setTimeout(() => x.inputEl.focus(), 0);
+        });
+    }
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))
+      .addButton((b) => b.setButtonText(t("common.save")).setCta().onClick(submit));
+  }
+  onClose(): void {
+    if (!this.done) this.opts.onCancel?.();
+    this.contentEl.empty();
+  }
+}
+
+/** Reaching a stage with open tasks: move them on to the next stage, or to the loose tasks. */
+export class ReachStageModal extends Modal {
+  constructor(
+    app: App,
+    private opts: { name: string; open: number; next: string | null; onChoose: (to: "next" | "loose") => Promise<unknown>; onCancel?: () => void },
+  ) {
+    super(app);
+  }
+  private done = false;
+  onOpen(): void {
+    const o = this.opts;
+    this.setTitle(t("stage.reach"));
+    this.modalEl.addClass("ql-modal");
+    this.contentEl.createEl("p", {
+      text: o.open === 1 ? t("stage.reachAskOne", { name: o.name }) : t("stage.reachAsk", { name: o.name, n: o.open }),
+    });
+    const choose = (to: "next" | "loose") =>
+      act(async () => {
+        await o.onChoose(to);
+        this.done = true;
+        this.close();
+      });
+    const row = this.contentEl.createDiv({ cls: "ql-modal-choices" });
+    const buttons: HTMLButtonElement[] = [];
+    if (o.next !== null) {
+      const b = row.createEl("button", { cls: "mod-cta", text: t("stage.toNext", { name: o.next }) });
+      b.onclick = choose("next");
+      buttons.push(b);
+    }
+    const loose = row.createEl("button", { cls: o.next === null ? "mod-cta" : "", text: t("stage.toLoose") });
+    loose.onclick = choose("loose");
+    buttons.push(loose);
+    const cancel = row.createEl("button", { text: t("common.cancel") });
+    cancel.onclick = () => this.close();
+    window.setTimeout(() => buttons[0]?.focus(), 0);
+  }
+  onClose(): void {
+    if (!this.done) this.opts.onCancel?.();
+    this.contentEl.empty();
   }
 }

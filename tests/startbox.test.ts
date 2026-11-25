@@ -126,6 +126,12 @@ describe("buildRows", () => {
     expect(kinds(r)).toEqual(["start", "add"]);
     expect(r[0]).toMatchObject({ quest: trade });
   });
+  it("treats a quest chosen in the box like a token; a typed token still wins", () => {
+    const r = buildRows({ ...base, input: "draft", chosenQuest: travel, lastQuest: trade });
+    expect(kinds(r)).toEqual(["start", "add", "task", "task"]);
+    expect(r.every((row) => row.quest === travel)).toBe(true);
+    expect(buildRows({ ...base, input: "draft #trade", chosenQuest: travel })[0]).toMatchObject({ quest: trade });
+  });
   it("puts add first in add mode", () => {
     expect(kinds(buildRows({ ...base, mode: "add", input: "brand new" }))).toEqual(["add", "backlog", "start"]);
     expect(kinds(buildRows({ ...base, mode: "add", input: "x #travel" }))[0]).toBe("add");

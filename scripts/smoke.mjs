@@ -1,5 +1,5 @@
 // Smoke test: builds the plugin, starts its OWN Obsidian on a generated demo vault and drives it over CDP.
-//   npm run smoke [-- --keep] [-- --only <text>] [-- --lang en|de] [-- --no-build] [-- --fail-test]
+//   npm run smoke [-- --keep] [-- --only <text>[,<text>…]] [-- --lang en|de] [-- --no-build] [-- --fail-test]
 // Safety: demo vault and profile live in a new folder in the system's temp directory, on an own debugging port; never
 // attaches to a port it did not open, refuses a work folder outside the temp directory, and only ever stops the process
 // it spawned itself (child handle). Report and screenshots go to .smoke/out/ in the repo.
@@ -148,7 +148,7 @@ try {
     },
   };
   const only = opt("only");
-  let list = allSteps.filter((s) => !only || s.name.includes(only));
+  let list = allSteps.filter((s) => !only || only.split(",").some((o) => s.name.includes(o)));
   if (flag("fail-test")) list = [...list, { name: "deliberately-broken", issue: "smoke", run: async () => { throw new Error("broken on purpose (--fail-test)"); } }];
 
   for (const lang of LANGS) {

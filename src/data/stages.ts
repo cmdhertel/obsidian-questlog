@@ -10,6 +10,9 @@ export interface SectionNames {
   stages: string;
   tasks: string;
 }
+/** What a caller remembers of a stage to find it again in changed content. */
+export type StageRef = Pick<Stage, "index" | "line" | "name">;
+
 export interface StageDates {
   started?: string | null;
   target?: string | null;

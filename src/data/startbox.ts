@@ -94,6 +94,8 @@ export interface BuildRowsArgs {
   plannedIds: string[];
   /** Quest from `settings.lastWork`, already checked to be workable; null if none. */
   lastQuest: Quest | null;
+  /** Quest picked in the box itself (phone quest row, #28); acts like a token, a typed token still wins. */
+  chosenQuest?: Quest | null;
 }
 
 /**
@@ -107,8 +109,9 @@ export interface BuildRowsArgs {
 export function buildRows(a: BuildRowsArgs): StartRow[] {
   const parsed = parseStartInput(a.input, a.quests, a.otherNames);
   const other = a.quests.find((q) => q.kind === "other") ?? null;
-  const dest = parsed.quest ?? a.lastQuest ?? other;
-  const pool = parsed.quest ? a.entries.filter((e) => e.quest.path === parsed.quest!.path) : a.entries;
+  const picked = parsed.quest ?? a.chosenQuest ?? null;
+  const dest = picked ?? a.lastQuest ?? other;
+  const pool = picked ? a.entries.filter((e) => e.quest.path === picked.path) : a.entries;
   const tasks: StartRow[] = rankTasks(parsed.text, pool, a.plannedIds, a.otherNames).map(
     (e) => ({ kind: "task", task: e.task, quest: e.quest }),
   );
@@ -120,5 +123,5 @@ export function buildRows(a: BuildRowsArgs): StartRow[] {
     return [add, { kind: "backlog", text: parsed.text, quest: dest }, start, ...tasks];
   }
   const create = [start, add];
-  return parsed.tokenUsed || tasks.length === 0 ? [...create, ...tasks] : [...tasks, ...create];
+  return parsed.tokenUsed || picked || tasks.length === 0 ? [...create, ...tasks] : [...tasks, ...create];
 }
