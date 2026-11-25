@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { resolveContinue, resolveContinueSession, type WorkLookup } from "../src/data/lastwork";
 import type { LastWork, Quest, Session, Task } from "../src/data/model";
 
-const mkTask = (id: string, text: string, done = false): Task => ({ id, text, done, doneDate: null, line: 0, questPath: "" });
+const mkTask = (id: string, text: string, done = false): Task => ({ id, text, done, doneDate: null, line: 0, questPath: "", stage: null, stageIndex: null });
 const mkQuest = (name: string, over: Partial<Quest> = {}): Quest => ({
   path: `${name}.md`, name, kind: "quest", status: "active", color: "", icon: "", why: "",
-  weeklyHours: 0, order: 0, tasks: [], ...over,
+  weeklyHours: 0, order: 0, tasks: [], stages: [], created: null, checkedIn: null, paused: null, finished: null, ...over,
 });
 
 const open = mkTask("t1", "Draft the Lisbon chapter (renamed)");

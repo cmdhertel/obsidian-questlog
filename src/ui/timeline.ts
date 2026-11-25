@@ -1,10 +1,11 @@
 // Time grid for one or more days, filled from logged sessions plus the running timer.
 // Used by Calendar (week or single day) and the Home sidebar (today).
-import { fmtClock, fmtDuration, minutesOfDay, parseDay } from "../data/dates";
+import { fmtClock, fmtDuration, isoDay, minutesOfDay, parseDay } from "../data/dates";
+import { findGaps, gapSuggestions, hasFreeStretch, runningSpan, type GapItem } from "../data/gaps";
 import { dur, layoutLanes, totalMinutes } from "../data/stats";
 import type { Session } from "../data/model";
 import { workTitle } from "../data/timerlog";
-import { weekdayShort } from "../i18n";
+import { t, weekdayShort } from "../i18n";
 import type { Ctx } from "./ctx";
 import { SessionModal } from "./modals";
 import { resolveContinueSession } from "../data/lastwork";
@@ -16,6 +17,8 @@ export interface TimelineOpts {
   head?: boolean;
   /** Always show the whole day instead of the configured hours. */
   fullDay?: boolean;
+  /** Draw unlogged stretches of today and yesterday (default true). */
+  gaps?: boolean;
 }
 
 export function renderTimeline(el: HTMLElement, ctx: Ctx, days: string[], opts: TimelineOpts = {}): HTMLElement {
@@ -24,6 +27,7 @@ export function renderTimeline(el: HTMLElement, ctx: Ctx, days: string[], opts: 
   const sessions = store.sessions(days);
   const running = plugin.settings.timer;
   const now = minutesOfDay(new Date());
+  const yesterday = isoDay(new Date(parseDay(today).getFullYear(), parseDay(today).getMonth(), parseDay(today).getDate() - 1));
 
   // Visible hour range: settings, stretched to include any logged session and the running timer
   let from = opts.fullDay ? 0 : plugin.settings.calendarStartHour;
@@ -71,6 +75,8 @@ export function renderTimeline(el: HTMLElement, ctx: Ctx, days: string[], opts: 
       const min = from * 60 + Math.floor(((e.clientY - rect.top) / hourPx) * 4) * 15;
       new SessionModal(plugin, { day, start: min, end: Math.min(1440, min + 30) }).open();
     };
+
+    if (opts.gaps !== false && (day === today || day === yesterday)) drawGaps(col, ctx, day, sessions.filter((s) => s.day === day), y);
 
     for (const { session, lane, lanes } of layoutLanes(sessions.filter((s) => s.day === day))) {
       block(col, ctx, session, y(session.start), y(session.end), lane, lanes, () => new SessionModal(plugin, session, session).open(), true);
@@ -120,4 +126,69 @@ function block(col: HTMLElement, ctx: Ctx, s: Session, top: number, bottom: numb
     onClick();
   };
   return b;
+}
+
+/** Unlogged stretches (or one "Nothing logged" row) of today or yesterday, drawn under the sessions. */
+function drawGaps(col: HTMLElement, ctx: Ctx, day: string, daySessions: Session[], y: (min: number) => number): void {
+  const { store, plugin, today } = ctx;
+  const winFrom = plugin.settings.calendarStartHour * 60;
+  const winTo = plugin.settings.calendarEndHour * 60;
+  const nowMs = Date.now();
+  const now = day === today ? minutesOfDay(new Date(nowMs)) : undefined;
+  if (now !== undefined && now < winFrom) return;
+  const running = plugin.settings.timer;
+  const run = running ? runningSpan(running.start, nowMs, day) : null;
+  const covered = [...daySessions.map((s) => ({ start: s.start, end: s.end })), ...(run ? [run] : [])];
+  const breaks = store.breaksOf(day);
+  const items = () => suggestionsFor(ctx, day);
+  const add = (start: number, end: number, cls: string, text: string, breakSpan?: { start: number; end: number }) => {
+    const mins = end - start;
+    const top = y(start);
+    const g = col.createDiv({ cls: `ql-cal-gap ${cls}`.trim(), attr: { role: "button", tabindex: "0" } });
+    g.style.top = `${top}px`;
+    g.style.height = `${Math.max(20, y(end) - top)}px`;
+    const label = text || t("gap.aria", { from: fmtClock(start), to: fmtClock(end), dur: fmtDuration(mins) });
+    g.setAttr("aria-label", text ? `${text}. ${t("gap.add")}` : label);
+    if (y(end) - top >= 30) g.createSpan({ cls: "ql-cal-gap-text", text: text || `${fmtClock(start)}–${fmtClock(end)} · ${t("gap.unlogged")} · ${fmtDuration(mins)}` });
+    else if (y(end) - top >= 18) g.createSpan({ cls: "ql-cal-gap-text", text: text || t("gap.unlogged") });
+    const open = () => {
+      // A stretch that ended at "now" keeps growing until it is opened.
+      const end2 = end === now && isoDay(new Date()) === day ? Math.max(end, Math.min(winTo, minutesOfDay(new Date()))) : end;
+      new SessionModal(plugin, { day, start, end: end2, suggestions: items(), breakSpan }).open();
+    };
+    g.onclick = (e) => {
+      e.stopPropagation();
+      open();
+    };
+    g.onkeydown = (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+      open();
+    };
+  };
+  if (covered.length === 0) {
+    const to = now === undefined ? winTo : Math.min(winTo, now);
+    if (to - winFrom < 15 || !hasFreeStretch({ from: winFrom, to: winTo, now, breaks })) return;
+    add(winFrom, to, "is-empty", t("gap.nothing"), { start: winFrom, end: winTo });
+    return;
+  }
+  for (const g of findGaps({ covered, from: winFrom, to: winTo, now, breaks })) {
+    add(g.start, g.end, g.edge === "none" ? "" : "is-edge", "");
+  }
+}
+
+function suggestionsFor(ctx: Ctx, day: string): GapItem[] {
+  const { store, plugin } = ctx;
+  const item = (x: { id: string; text: string; questPath: string } & Parameters<typeof store.questOf>[0]): GapItem | null => {
+    const q = store.questOf(x);
+    return q ? { quest: q.name, taskId: x.id, taskText: x.text } : null;
+  };
+  const list = (tasks: Parameters<typeof store.questOf>[0][]) => tasks.map((x) => item(x)).filter((x): x is GapItem => !!x);
+  const last = plugin.settings.lastWork;
+  return gapSuggestions({
+    done: list(store.doneOn(day)),
+    planned: list(day < ctx.today ? store.plannedOn(day) : store.dayTasks(day, ctx.today)),
+    last: last ? { quest: last.quest, taskId: last.taskId, taskText: last.taskText } : undefined,
+  });
 }

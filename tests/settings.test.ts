@@ -42,6 +42,11 @@ describe("mergeSettings", () => {
     expect(m).toMatchObject({ nudgeMinutes: 0, checkinWeeks: 5, lastWork: lw });
   });
 
+  it("normalises nudgeMinutes to the offered choices", () => {
+    for (const bad of [12, -5, 600, 0.5, "15"]) expect(mergeSettings(defaults, { nudgeMinutes: bad }).nudgeMinutes).toBe(15);
+    for (const ok of [0, 10, 15, 20, 30, 45]) expect(mergeSettings(defaults, { nudgeMinutes: ok }).nudgeMinutes).toBe(ok);
+  });
+
   it("keeps unknown keys and survives non-object input", () => {
     expect(mergeSettings(defaults, { future: 1 })).toHaveProperty("future", 1);
     expect(mergeSettings(defaults, null)).toEqual(defaults);

@@ -3,9 +3,13 @@ import { App, Events, TFile, TFolder, normalizePath } from "obsidian";
 import type { QuestlogSettings } from "../settings";
 import { t, variants } from "../i18n";
 import { isoDay, isoWeek } from "./dates";
+import { formatBreak, parseBreaks } from "./gaps";
 import * as md from "./markdown";
 import * as plan from "./plan";
-import type { DayLog, Quest, QuestStatus, Review, Session, Task } from "./model";
+import * as st from "./stages";
+import * as vis from "./vision";
+import { fmDay, statusDates } from "./questdates";
+import type { DayLog, Quest, QuestStatus, Review, Session, Span, Task, VisionNote } from "./model";
 
 export const PALETTE = ["#7c6cf0", "#2f9e8f", "#e0823d", "#d04f7a", "#4a90d9", "#8a9a3b", "#b4637a", "#c9a227"];
 /** Basename of the inbox note for non-quest tasks; sessions link to it as [[Other]]. */
@@ -22,6 +26,8 @@ export class QuestStore extends Events {
   other: Quest;
   days = new Map<string, DayLog>();
   reviews = new Map<string, Review>();
+  /** `Vision.md`, or null while there is no such note. */
+  vision: VisionNote | null = null;
   private pending = new Set<string>();
   private timer: number | null = null;
 
@@ -47,9 +53,13 @@ export class QuestStore extends Events {
   get otherPath(): string {
     return `${this.root}/${OTHER}.md`;
   }
-  private kind(path: string): "quest" | "other" | "day" | "review" | null {
+  get visionPath(): string {
+    return `${this.root}/Vision.md`;
+  }
+  private kind(path: string): "quest" | "other" | "day" | "review" | "vision" | null {
     if (!path.endsWith(".md")) return null;
     if (path === this.otherPath) return "other";
+    if (path === this.visionPath) return "vision";
     const dir = path.slice(0, path.lastIndexOf("/"));
     if (dir === this.questsDir) return "quest";
     if (dir === this.daysDir) return "day";
@@ -60,7 +70,7 @@ export class QuestStore extends Events {
   private emptyOther(): Quest {
     return {
       path: this.otherPath, name: OTHER, kind: "other", status: "active", color: OTHER_COLOR,
-      icon: "inbox", why: "", weeklyHours: 0, order: 0, tasks: [],
+      icon: "inbox", why: "", weeklyHours: 0, order: 0, tasks: [], stages: [], created: null, checkedIn: null, paused: null, finished: null,
     };
   }
 
@@ -71,6 +81,7 @@ export class QuestStore extends Events {
     this.other = this.emptyOther();
     this.days.clear();
     this.reviews.clear();
+    this.vision = null;
     const files = this.app.vault.getMarkdownFiles().filter((f) => this.kind(f.path));
     await Promise.all(files.map((f) => this.readFile(f)));
     this.sortQuests();
@@ -103,6 +114,8 @@ export class QuestStore extends Events {
       this.forget(path);
       const f = this.app.vault.getAbstractFileByPath(path);
       if (f instanceof TFile) await this.readFile(f);
+      // Kept while it is read again, so Home never shows an empty vision in between.
+      else if (path === this.visionPath) this.vision = null;
     }
     this.sortQuests();
     this.trigger("changed");
@@ -120,12 +133,14 @@ export class QuestStore extends Events {
     const fm: Record<string, unknown> = this.app.metadataCache.getFileCache(f)?.frontmatter ?? {};
     const content = await this.app.vault.cachedRead(f);
     if (kind === "quest") this.quests.push(this.toQuest(f, fm, content));
+    else if (kind === "vision") this.vision = vis.parseVision(content);
     else if (kind === "other") this.other = { ...this.emptyOther(), tasks: md.parseTasks(content, f.path) };
     else if (kind === "day" && DAY_RE.test(f.basename)) {
       this.days.set(f.basename, {
         path: f.path,
         day: f.basename,
         plan: arr(fm.plan),
+        breaks: parseBreaks(fm.breaks),
         sessions: md.parseSessions(content, f.basename),
       });
     } else if (kind === "review" && WEEK_RE.test(f.basename)) {
@@ -147,6 +162,11 @@ export class QuestStore extends Events {
       weeklyHours: Number(fm.weekly_hours) || 0,
       order: Number.isFinite(Number(fm.order)) && fm.order !== undefined ? Number(fm.order) : 999,
       tasks: md.parseTasks(content, f.path),
+      stages: st.parseStages(content),
+      created: fmDay(fm.created),
+      checkedIn: fmDay(fm.checked_in),
+      paused: fmDay(fm.paused),
+      finished: fmDay(fm.finished),
     };
   }
 
@@ -215,6 +235,10 @@ export class QuestStore extends Events {
   dayTasks(day: string, today = isoDay(new Date())): Task[] {
     return plan.dayIds(this.planDays(), day, today, this.isOpen).map((id) => this.task(id)!).filter(Boolean);
   }
+  /** What a day's own plan lists, done or not (past days keep their plan; carried tasks are not added). */
+  plannedOn(day: string): Task[] {
+    return (this.days.get(day)?.plan ?? []).map((id) => this.task(id)).filter((x): x is Task => !!x);
+  }
   /** Tasks completed on a day. */
   doneOn(day: string): Task[] {
     return this.allTasks().filter((x) => x.done && x.doneDate === day);
@@ -231,6 +255,88 @@ export class QuestStore extends Events {
     const p = plan.latestPlanned(this.planDays()).get(task.id);
     if (!p) return null;
     return p.day < today ? today : p.day;
+  }
+
+  // ------------------------------------------------------------ vision
+
+  /** The text Home shows: the note's, or the old setting while no note exists yet. */
+  visionText(): string {
+    return this.vision ? this.vision.text : this.settings().vision.trim();
+  }
+
+  private visionHeads(): vis.VisionHeads {
+    return { earlier: t("md.earlier"), until: t("md.until") };
+  }
+
+  /**
+   * Once per start, after the first reload: settings.vision is copied into Vision.md and cleared, but only when
+   * the setting has text and the note does not exist. If creating fails the setting stays; if the note exists
+   * both are left alone (the note wins).
+   */
+  async migrateVision(): Promise<"created" | "skipped" | "failed"> {
+    const text = this.settings().vision.trim();
+    if (!text || this.app.vault.getAbstractFileByPath(this.visionPath)) return "skipped";
+    try {
+      await this.ensureFolder(this.root);
+      const f = await this.app.vault.create(this.visionPath, vis.newVisionNote(text, isoDay(new Date())));
+      await this.readFile(f);
+      this.trigger("changed");
+    } catch (e) {
+      console.error("Questlog: could not migrate the vision", e);
+      return "failed";
+    }
+    this.settings().vision = "";
+    await this.saveSettings();
+    return "created";
+  }
+
+  /** Vision.md, created when missing (from the old setting when it still holds text). */
+  async visionFile(): Promise<TFile> {
+    await this.migrateVision();
+    const f = this.app.vault.getAbstractFileByPath(this.visionPath);
+    if (f instanceof TFile) return f;
+    await this.ensureFolder(this.root);
+    const created = await this.app.vault.create(this.visionPath, vis.newVisionNote("", isoDay(new Date())));
+    await this.readFile(created);
+    this.trigger("changed");
+    return created;
+  }
+
+  /** Replace the vision text; with `keepOld` the previous text goes to `## Earlier`. Unchanged text does nothing. */
+  async saveVision(text: string, keepOld: boolean): Promise<void> {
+    const today = isoDay(new Date());
+    const heads = this.visionHeads();
+    const next = text.trim();
+    const f = this.app.vault.getAbstractFileByPath(this.visionPath);
+    if (!(f instanceof TFile)) {
+      const old = this.settings().vision.trim();
+      if (next === old || (!next && !old)) return;
+      let c = vis.newVisionNote(next, today);
+      if (keepOld) c = vis.archiveVision(c, old, today, heads);
+      await this.ensureFolder(this.root);
+      const created = await this.app.vault.create(this.visionPath, c);
+      this.settings().vision = "";
+      await this.saveSettings();
+      await this.readFile(created);
+      this.trigger("changed");
+      return;
+    }
+    let changed = false;
+    let result = "";
+    await this.app.vault.process(f, (c) => {
+      const old = vis.parseVision(c).text;
+      if (old === next) return c;
+      changed = true;
+      result = vis.setVisionText(c, next);
+      if (keepOld) result = vis.archiveVision(result, old, today, heads);
+      return result;
+    });
+    if (!changed) return;
+    await this.app.fileManager.processFrontMatter(f, (fm: Record<string, unknown>) => {
+      fm.updated = today;
+    });
+    await this.readFile(f);
+    this.trigger("changed");
   }
 
   // ------------------------------------------------------------ files
@@ -316,7 +422,15 @@ export class QuestStore extends Events {
       if (patch.weeklyHours !== undefined) fm.weekly_hours = patch.weeklyHours;
       if (patch.color !== undefined) fm.color = patch.color;
       if (patch.icon !== undefined) fm.icon = patch.icon;
-      if (patch.status !== undefined) fm.status = patch.status;
+      if (patch.status !== undefined) {
+        const from: QuestStatus = fm.status === "done" || fm.status === "paused" ? fm.status : "active";
+        const dates = statusDates(from, patch.status, isoDay(new Date()));
+        for (const k of ["paused", "finished"] as const) {
+          if (dates[k] === null) delete fm[k];
+          else if (dates[k] !== undefined) fm[k] = dates[k];
+        }
+        fm.status = patch.status;
+      }
       if (patch.order !== undefined) fm.order = patch.order;
     });
     if (patch.name !== undefined && patch.name.trim() !== quest.name) {
@@ -359,14 +473,30 @@ export class QuestStore extends Events {
 
   // ------------------------------------------------------------ tasks
 
+  private sectionNames(): st.SectionNames {
+    return { stages: t("md.stages"), tasks: t("md.tasks") };
+  }
+
+  /** Re-read a quest note so follow-up calls see it before the metadata cache catches up. */
+  private async refreshQuest(quest: Quest, f: TFile): Promise<void> {
+    const content = await this.app.vault.read(f);
+    const tasks = md.parseTasks(content, f.path);
+    if (quest.kind === "other") this.other = { ...this.other, path: f.path, tasks };
+    else {
+      quest.tasks = tasks;
+      quest.stages = st.parseStages(content);
+    }
+  }
+
   async addTask(quest: Quest, text: string): Promise<string> {
     const id = md.newId();
     const f = await this.questFile(quest);
-    await this.app.vault.process(f, (c) => md.appendToSection(c, t("md.tasks"), md.taskLine(text, id)));
-    // Make the new task visible to follow-up calls (plan, timer) before the metadata cache catches up.
-    const tasks = md.parseTasks(await this.app.vault.read(f), f.path);
-    if (quest.kind === "other") this.other = { ...this.other, path: f.path, tasks };
-    else quest.tasks = tasks;
+    const line = md.taskLine(text, id);
+    await this.app.vault.process(f, (c) => {
+      const cur = quest.kind === "other" ? null : st.currentStage(st.parseStages(c));
+      return cur ? st.addTaskToStage(c, cur.index, line, this.sectionNames()) : md.appendToSection(c, t("md.tasks"), line);
+    });
+    await this.refreshQuest(quest, f);
     return id;
   }
 
@@ -419,7 +549,7 @@ export class QuestStore extends Events {
     });
     const d = this.days.get(day);
     if (d) d.plan = unique;
-    else this.days.set(day, { path: f.path, day, plan: unique, sessions: [] });
+    else this.days.set(day, { path: f.path, day, plan: unique, breaks: [], sessions: [] });
   }
 
   /** Schedule a task on a day at a position, or move it back to the backlog with `day = null`. */
@@ -454,6 +584,29 @@ export class QuestStore extends Events {
       const line = c.split("\n")[s.line] ?? "";
       return md.isSessionLine(line) ? md.deleteLine(c, s.line) : c;
     });
+  }
+
+  /** Not-work time of a day, from its note. */
+  breaksOf(day: string): Span[] {
+    return this.days.get(day)?.breaks ?? [];
+  }
+
+  /** Mark a span of a day as not work time. */
+  async addBreak(day: string, span: Span): Promise<void> {
+    if (span.end <= span.start) return;
+    const f = await this.dayFile(day);
+    let breaks: Span[] = [];
+    await this.app.fileManager.processFrontMatter(f, (fm: Record<string, unknown>) => {
+      // Entries we cannot read stay in the note; only the new span is added.
+      const old: unknown[] = Array.isArray(fm.breaks) ? fm.breaks : typeof fm.breaks === "string" ? [fm.breaks] : [];
+      const text = formatBreak(span);
+      const next = old.includes(text) ? old : [...old, text];
+      fm.breaks = next;
+      breaks = parseBreaks(next);
+    });
+    const d = this.days.get(day);
+    if (d) d.breaks = breaks;
+    else this.days.set(day, { path: f.path, day, plan: [], breaks, sessions: [] });
   }
 
   // ------------------------------------------------------------ review

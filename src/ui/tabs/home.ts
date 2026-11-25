@@ -21,7 +21,8 @@ export function renderHome(el: HTMLElement, ctx: Ctx): void {
   headStat(stats, fmtHours(todayMin), t("home.today"));
   headStat(stats, target ? `${fmtHours(weekQuestMin)} / ${target}h` : fmtHours(weekQuestMin), t("home.week"));
 
-  if (plugin.settings.vision.trim()) el.createDiv({ cls: "ql-vision", text: plugin.settings.vision.trim() });
+  const vision = store.visionText();
+  if (vision) el.createDiv({ cls: "ql-vision", text: vision });
 
   const grid = el.createDiv({ cls: "ql-home" });
   const main = grid.createDiv({ cls: "ql-home-main" });

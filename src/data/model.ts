@@ -10,6 +10,38 @@ export interface Task {
   /** 0-based line in the quest note. */
   line: number;
   questPath: string;
+  /** Name of the stage the task belongs to; null = loose. Names can repeat, stageIndex is the key. */
+  stage: string | null;
+  stageIndex: number | null;
+}
+
+/** Minutes since midnight, end exclusive. */
+export interface Span {
+  start: number;
+  end: number;
+}
+
+/** A `###` heading in the Stages section of a quest note. */
+export interface Stage {
+  /** Position in the section, the key of a stage. */
+  index: number;
+  /** Heading text without the markers; may be empty. */
+  name: string;
+  started: string | null;
+  target: string | null;
+  reached: string | null;
+  /** 0-based line of the heading. */
+  line: number;
+  /** Line after the last line of the body (exclusive). */
+  end: number;
+}
+
+/** `Vision.md`. */
+export interface VisionNote {
+  text: string;
+  updated: string | null;
+  /** Earlier versions, newest first. */
+  earlier: { until: string; text: string }[];
 }
 
 export interface Quest {
@@ -28,6 +60,13 @@ export interface Quest {
   weeklyHours: number;
   order: number;
   tasks: Task[];
+  /** Document order; empty for Other and notes without a Stages section. */
+  stages: Stage[];
+  /** Days from the frontmatter. */
+  created: string | null;
+  checkedIn: string | null;
+  paused: string | null;
+  finished: string | null;
 }
 
 export interface Session {
@@ -50,6 +89,8 @@ export interface DayLog {
   day: string;
   /** Planned task ids in order. */
   plan: string[];
+  /** Time that is not work, from the `breaks` frontmatter. */
+  breaks: Span[];
   sessions: Session[];
 }
 

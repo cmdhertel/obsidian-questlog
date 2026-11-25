@@ -3,11 +3,11 @@ import { buildRows, matchQuest, parseStartInput, rankTasks, type TaskEntry } fro
 import type { Quest, Task } from "../src/data/model";
 
 const task = (text: string, line: number, id = "", done = false): Task => ({
-  id, text, done, doneDate: null, line, questPath: "",
+  id, text, done, doneDate: null, line, questPath: "", stage: null, stageIndex: null,
 });
 const quest = (name: string, order: number, over: Partial<Quest> = {}): Quest => ({
   path: `${name}.md`, name, kind: "quest", status: "active", color: "", icon: "", why: "",
-  weeklyHours: 0, order, tasks: [], ...over,
+  weeklyHours: 0, order, tasks: [], stages: [], created: null, checkedIn: null, paused: null, finished: null, ...over,
 });
 const travel = quest("Travel book", 1);
 const trade = quest("Book trade", 2);

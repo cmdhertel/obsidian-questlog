@@ -1,4 +1,5 @@
 import type { LastWork } from "./model";
+import { NUDGE_OPTIONS } from "./nudge";
 
 /** The keys of the settings that need more than a shallow merge. */
 export interface MergeShape {
@@ -28,12 +29,13 @@ export function mergeSettings<T extends MergeShape>(defaults: T, stored: unknown
     }
   }
   const num = (v: unknown, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
+  const nudge = (v: unknown, fallback: number) => (typeof v === "number" && NUDGE_OPTIONS.includes(v) ? v : fallback);
   return {
     ...defaults,
     ...data,
     rituals,
     checkinWeeks: num(data.checkinWeeks, defaults.checkinWeeks),
-    nudgeMinutes: num(data.nudgeMinutes, defaults.nudgeMinutes),
+    nudgeMinutes: nudge(data.nudgeMinutes, defaults.nudgeMinutes),
     lastWork: validLastWork(data.lastWork),
   };
 }

@@ -2,7 +2,10 @@ import { App, PluginSettingTab, Setting, normalizePath, type SettingDefinition, 
 import type QuestlogPlugin from "./main";
 import type { LastWork, Quest, RunningTimer } from "./data/model";
 import { mergeSettings } from "./data/settings-merge";
+import { NUDGE_OPTIONS } from "./data/nudge";
 import { t, type Key } from "./i18n";
+import { act } from "./ui/components";
+import { VisionModal } from "./ui/modals";
 
 export { mergeSettings };
 
@@ -28,7 +31,7 @@ export interface QuestlogSettings {
   rituals: { start: string | null; close: string | null; week: string | null; checkin: string | null };
   /** Weeks of data the goal check-in looks at. */
   checkinWeeks: number;
-  /** Idle minutes before the nudge appears. 0 = off. */
+  /** Active minutes before the nudge appears. 0 = off. */
   nudgeMinutes: number;
   lastWork: LastWork | null;
 }
@@ -144,13 +147,18 @@ export class QuestlogSettingTab extends PluginSettingTab {
             ),
           ),
           row(t("set.vision"), "set.alias.vision", t("set.visionDesc"), (x) =>
-            x.addTextArea((c) =>
-              c.setValue(plugin.settings.vision).onChange(async (v) => {
-                plugin.settings.vision = v;
-                await save();
-                plugin.refreshViews();
-              }),
-            ),
+            x
+              .addButton((b) => b.setButtonText(t("set.visionEdit")).onClick(() => new VisionModal(plugin).open()))
+              .addButton((b) =>
+                b.setButtonText(t("set.visionOpen")).onClick(
+                  act(async () => {
+                    const f = await plugin.store.visionFile();
+                    await plugin.app.workspace.openLinkText(f.path, "", false);
+                    // The note opens behind the settings window; `setting` is not in the public types.
+                    (plugin.app as unknown as { setting?: { close?: () => void } }).setting?.close?.();
+                  }),
+                ),
+              ),
           ),
         ],
       },
@@ -189,6 +197,15 @@ export class QuestlogSettingTab extends PluginSettingTab {
               for (const m of TIME_BOXES) d.addOption(String(m), m ? t("focus.boxMin", { n: m }) : t("focus.boxFree"));
               d.setValue(String(plugin.settings.pomodoroMinutes)).onChange(async (v) => {
                 plugin.settings.pomodoroMinutes = Number(v);
+                await save();
+              });
+            }),
+          ),
+          row(t("set.nudge"), "set.alias.nudge", t("set.nudgeDesc"), (x) =>
+            x.addDropdown((d) => {
+              for (const m of NUDGE_OPTIONS) d.addOption(String(m), m ? t("set.nudgeN", { n: m }) : t("set.nudgeOff"));
+              d.setValue(String(plugin.settings.nudgeMinutes)).onChange(async (v) => {
+                plugin.settings.nudgeMinutes = Number(v);
                 await save();
               });
             }),

@@ -1,11 +1,13 @@
 import { App, FuzzySuggestModal, Modal, Notice, Setting, setIcon, setTooltip } from "obsidian";
 import type QuestlogPlugin from "../main";
-import type { Quest, Session, Task } from "../data/model";
+import type { Quest, Session, Span, Task } from "../data/model";
+import type { GapItem } from "../data/gaps";
 import { fmtClock, isoDay, minutesOfDay, parseClock } from "../data/dates";
 import { clampToday, midnightOf, minuteToMs, type StartClamp } from "../data/startearlier";
 import { resolveContinueSession } from "../data/lastwork";
 import { PALETTE } from "../data/store";
 import { t } from "../i18n";
+import { act } from "./components";
 
 export class ConfirmModal extends Modal {
   constructor(app: App, private message: string, private onYes: () => void) {
@@ -48,6 +50,47 @@ export class TextModal extends Modal {
       window.setTimeout(() => x.inputEl.select(), 0);
     });
     new Setting(this.contentEl).addButton((b) => b.setButtonText(t("common.save")).setCta().onClick(submit));
+  }
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** Edit the vision note; the old text can be kept under "Earlier". */
+export class VisionModal extends Modal {
+  constructor(private plugin: QuestlogPlugin) {
+    super(plugin.app);
+  }
+  onOpen(): void {
+    const { store } = this.plugin;
+    this.setTitle(t("vision.edit"));
+    this.modalEl.addClass("ql-modal");
+    let text = store.visionText();
+    let keep = true;
+    const area = this.contentEl.createEl("textarea", { cls: "ql-wide ql-vision-input", attr: { rows: "8", "aria-label": t("set.vision") } });
+    area.value = text;
+    area.addEventListener("input", () => (text = area.value));
+    const label = this.contentEl.createEl("label", { cls: "ql-vision-keep" });
+    const box = label.createEl("input", { type: "checkbox", cls: "ql-check" });
+    box.checked = keep;
+    box.addEventListener("change", () => (keep = box.checked));
+    label.createSpan({ text: t("vision.keepOld") });
+    let busy = false;
+    const submit = act(async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        // Save first: when writing fails, the dialog stays open and keeps the text.
+        await store.saveVision(text, keep);
+        this.close();
+      } finally {
+        busy = false;
+      }
+    });
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))
+      .addButton((b) => b.setButtonText(t("common.save")).setCta().onClick(submit));
+    window.setTimeout(() => area.focus(), 0);
   }
   onClose(): void {
     this.contentEl.empty();
@@ -168,7 +211,7 @@ export class QuestModal extends Modal {
 export class SessionModal extends Modal {
   constructor(
     private plugin: QuestlogPlugin,
-    private init: { day: string; start: number; end: number; quest?: string; taskId?: string; taskText?: string },
+    private init: { day: string; start: number; end: number; quest?: string; taskId?: string; taskText?: string; suggestions?: GapItem[]; breakSpan?: Span },
     private existing?: Session,
   ) {
     super(plugin.app);
@@ -186,6 +229,25 @@ export class SessionModal extends Modal {
       taskText: this.init.taskText ?? "",
       note: this.existing?.note ?? "",
     };
+    const chips = this.init.suggestions?.filter((x) => quests.some((q) => q.name === x.quest)) ?? [];
+    let pickQuest: ((q: string) => void) | undefined;
+    if (chips.length) {
+      const row = this.contentEl.createDiv({ cls: "ql-gap-fill" });
+      row.createDiv({ cls: "ql-gap-fill-label", text: t("gap.fill") });
+      const last = this.plugin.settings.lastWork;
+      for (const c of chips) {
+        const isLast = !!last && last.quest === c.quest && last.taskId === c.taskId && last.taskText === c.taskText;
+        const label = c.taskText || (store.quest(c.quest)?.kind === "other" ? t("other.name") : c.quest);
+        const chip = row.createEl("button", { cls: "ql-gap-chip", text: isLast ? t("gap.last", { x: label }) : label });
+        chip.onclick = () => {
+          v.quest = c.quest;
+          v.taskId = c.taskId;
+          v.taskText = c.taskText;
+          pickQuest?.(c.quest);
+          fillTasks();
+        };
+      }
+    }
     new Setting(this.contentEl).setName(t("session.day")).addText((x) => {
       x.inputEl.type = "date";
       x.setValue(v.day).onChange((s) => (v.day = s));
@@ -216,6 +278,7 @@ export class SessionModal extends Modal {
     };
     new Setting(this.contentEl).setName(t("session.quest")).addDropdown((d) => {
       for (const q of quests) d.addOption(q.name, q.kind === "other" ? t("other.name") : q.name);
+      pickQuest = (q) => d.setValue(q);
       d.setValue(v.quest).onChange((s) => {
         v.quest = s;
         v.taskId = "";
@@ -244,6 +307,17 @@ export class SessionModal extends Modal {
         b.setButtonText(t("common.delete")).setClass("mod-warning").onClick(async () => {
           await store.deleteSession(ex);
           this.close();
+        }),
+      );
+    }
+    const breakSpan = this.init.breakSpan ?? { start: this.init.start, end: this.init.end };
+    if (!this.existing && this.init.suggestions) {
+      buttons.addButton((b) =>
+        b.setButtonText(t("gap.notWork")).onClick(() => {
+          store
+            .addBreak(this.init.day, breakSpan)
+            .then(() => this.close())
+            .catch((e: unknown) => new Notice(e instanceof Error ? e.message : String(e)));
         }),
       );
     }

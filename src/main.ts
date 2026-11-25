@@ -1,8 +1,9 @@
-import { Notice, Plugin, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
+import { Notice, Platform, Plugin, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
 import type { Task } from "./data/model";
 import type { StartOpts } from "./timer";
 import { QuestStore } from "./data/store";
 import { fmtElapsed, isoDay } from "./data/dates";
+import { ActivityCounter, nudgeDue } from "./data/nudge";
 import { DEFAULT_SETTINGS, QuestlogSettingTab, mergeSettings, type QuestlogSettings, type TabId } from "./settings";
 import { Timer } from "./timer";
 import { workTitle } from "./data/timerlog";
@@ -18,6 +19,10 @@ export default class QuestlogPlugin extends Plugin {
   private statusEl: HTMLElement | null = null;
   /** What the status bar item currently shows, so tick() only touches the DOM when that changes. */
   private statusKey = "";
+  /** Minutes of activity since the last timer, for the status bar nudge. In memory only. */
+  private activity = new ActivityCounter();
+  private fedMinute = -1;
+  private nudgeWindows = new WeakSet<Window>();
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -41,11 +46,13 @@ export default class QuestlogPlugin extends Plugin {
     this.registerInterval(window.setInterval(() => this.tick(), 1000));
 
     this.registerCommands();
+    this.setupActivity();
 
     this.app.workspace.onLayoutReady(async () => {
       for (const ref of this.store.watch()) this.registerEvent(ref);
       this.registerEvent(this.store.on("changed", () => this.refreshViews()));
       await this.store.reload();
+      await this.store.migrateVision();
     });
   }
 
@@ -167,6 +174,59 @@ export default class QuestlogPlugin extends Plugin {
     this.timer.checkBox();
   }
 
+  /** Feed the activity counter from the main window and every pop-out window. Desktop only. */
+  private setupActivity(): void {
+    if (Platform.isMobile) return;
+    const { workspace } = this.app;
+    this.watchActivity(window);
+    this.registerEvent(workspace.on("window-open", (_w, win) => this.watchActivity(win)));
+    this.registerEvent(workspace.on("editor-change", () => this.noteActivity()));
+    // Pop-outs restored with the layout never fire window-open for us.
+    workspace.onLayoutReady(() => {
+      workspace.iterateAllLeaves((leaf) => {
+        const win = leaf.view.containerEl.ownerDocument.defaultView;
+        if (win) this.watchActivity(win);
+      });
+    });
+  }
+
+  private watchActivity(win: Window): void {
+    if (this.nudgeWindows.has(win)) return;
+    this.nudgeWindows.add(win);
+    const note = () => this.noteActivity();
+    for (const type of ["keydown", "pointerdown", "pointermove"] as const) {
+      this.registerDomEvent(win, type, note, { passive: true });
+    }
+  }
+
+  private noteActivity(): void {
+    if (this.settings.timer) return;
+    const now = Date.now();
+    const minute = Math.floor(now / 60_000);
+    if (minute === this.fedMinute) return;
+    this.fedMinute = minute;
+    this.activity.note(now, isoDay(new Date(now)));
+  }
+
+  private resetActivity(): void {
+    this.activity.reset();
+    this.fedMinute = -1;
+  }
+
+  /** Quiet reminder: enough activity, no timer, and a planned open quest task today. */
+  private nudgeNow(): boolean {
+    const nudgeMinutes = this.settings.nudgeMinutes;
+    if (Platform.isMobile || nudgeMinutes <= 0 || this.activity.minutes < nudgeMinutes) return false;
+    const store = this.store;
+    return nudgeDue({
+      minutes: this.activity.minutes,
+      nudgeMinutes,
+      running: !!this.settings.timer,
+      plannedQuestTasks: store.dayTasks(this.today()).filter((x) => store.questOf(x)?.kind === "quest").length,
+      mobile: Platform.isMobile,
+    });
+  }
+
   private onStatusActivate(): void {
     if (this.settings.timer) void this.openView("focus");
     else if (this.statusEl?.getAttr("role") === "button") act(() => this.continueLast())();
@@ -177,13 +237,15 @@ export default class QuestlogPlugin extends Plugin {
     const el = this.statusEl;
     if (!el) return;
     const c = this.settings.timer;
+    if (c) this.resetActivity();
+    const nudge = !c && this.nudgeNow();
     const target = c ? null : this.timer.continueTarget();
     const title = target ? continueTitle(target) : "";
     const text = c ? `⏱ ${clockText(c.start, c.box ?? 0)} · ${workTitle(c.taskText, questName(this.store.quest(c.quest), c.quest))}` : "";
-    const key = c ? `run|${text}` : title ? `idle|${title}` : "";
+    const key = c ? `run|${text}` : nudge ? `nudge|${title}` : title ? `idle|${title}` : "";
     if (key === this.statusKey) return;
     this.statusKey = key;
-    if (!c && !title) {
+    if (!c && !title && !nudge) {
       el.empty();
       el.removeClass("is-running", "is-continue");
       for (const a of ["role", "tabindex", "aria-label", "data-tooltip-position"]) el.removeAttribute(a);
@@ -195,6 +257,15 @@ export default class QuestlogPlugin extends Plugin {
       el.removeClass("is-continue");
       el.setText(text);
       el.setAttr("aria-label", t("status.open"));
+    } else if (nudge) {
+      const label = title ? t("status.noTimerLabel", { title }) : t("status.noTimerStart");
+      el.empty();
+      el.removeClass("is-running");
+      el.addClass("is-continue");
+      if (title) setIcon(el.createSpan({ cls: "ql-status-icon" }), "play");
+      el.createSpan({ cls: "ql-status-text", text: t("status.noTimer") });
+      el.setAttr("aria-label", label);
+      setTooltip(el, label, { placement: "top" });
     } else {
       const label = t("status.continue", { title });
       el.empty();
