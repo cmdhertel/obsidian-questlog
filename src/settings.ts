@@ -5,7 +5,7 @@ import { mergeSettings, pickQuestions } from "./data/settings-merge";
 import type { Period } from "./data/periods";
 import { NUDGE_OPTIONS } from "./data/nudge";
 import { t, type Key } from "./i18n";
-import { act } from "./ui/components";
+import { act, actWith } from "./ui/components";
 import { VisionModal } from "./ui/modals";
 
 export { mergeSettings };
@@ -148,12 +148,12 @@ export class QuestlogSettingTab extends PluginSettingTab {
       row(name, aliasKey, undefined, (x) =>
         x.addDropdown((d) => {
           for (let h = 0; h <= 24; h++) d.addOption(String(h), `${String(h).padStart(2, "0")}:00`);
-          d.setValue(String(plugin.settings[key])).onChange(async (v) => {
+          d.setValue(String(plugin.settings[key])).onChange(actWith(async (v) => {
             plugin.settings[key] = Number(v);
             if (plugin.settings.calendarEndHour <= plugin.settings.calendarStartHour) plugin.settings.calendarEndHour = Math.min(24, plugin.settings.calendarStartHour + 1);
             await save();
             plugin.refreshViews();
-          });
+          }));
         }),
       );
 
@@ -162,11 +162,11 @@ export class QuestlogSettingTab extends PluginSettingTab {
         rows: [
           row(t("set.folder"), "set.alias.folder", t("set.folderDesc"), (x) =>
             x.addText((c) =>
-              c.setPlaceholder("Questlog").setValue(plugin.settings.folder).onChange(async (v) => {
+              c.setPlaceholder("Questlog").setValue(plugin.settings.folder).onChange(actWith(async (v) => {
                 plugin.settings.folder = normalizePath(v.trim() || "Questlog");
                 await save();
                 await plugin.store.reload();
-              }),
+              })),
             ),
           ),
           row(t("set.vision"), "set.alias.vision", t("set.visionDesc"), (x) =>
@@ -192,10 +192,10 @@ export class QuestlogSettingTab extends PluginSettingTab {
           hour(t("set.calEnd"), "set.alias.calEnd", "calendarEndHour"),
           row(t("set.minSession"), "set.alias.minSession", t("set.minSessionDesc"), (x) =>
             x.addSlider((c) =>
-              c.setLimits(0, 10, 1).setValue(plugin.settings.minSessionMinutes).onChange(async (v) => {
+              c.setLimits(0, 10, 1).setValue(plugin.settings.minSessionMinutes).onChange(actWith(async (v) => {
                 plugin.settings.minSessionMinutes = v;
                 await save();
-              }),
+              })),
             ),
           ),
         ],
@@ -208,29 +208,29 @@ export class QuestlogSettingTab extends PluginSettingTab {
               c.inputEl.type = "number";
               c.inputEl.min = "0";
               c.inputEl.step = "1";
-              c.setValue(String(plugin.settings.weeklyTarget)).onChange(async (v) => {
+              c.setValue(String(plugin.settings.weeklyTarget)).onChange(actWith(async (v) => {
                 plugin.settings.weeklyTarget = Math.max(0, Number(v) || 0);
                 await save();
                 plugin.refreshViews();
-              });
+              }));
             }),
           ),
           row(t("set.box"), "set.alias.box", t("set.boxDesc"), (x) =>
             x.addDropdown((d) => {
               for (const m of TIME_BOXES) d.addOption(String(m), m ? t("focus.boxMin", { n: m }) : t("focus.boxFree"));
-              d.setValue(String(plugin.settings.pomodoroMinutes)).onChange(async (v) => {
+              d.setValue(String(plugin.settings.pomodoroMinutes)).onChange(actWith(async (v) => {
                 plugin.settings.pomodoroMinutes = Number(v);
                 await save();
-              });
+              }));
             }),
           ),
           row(t("set.nudge"), "set.alias.nudge", t("set.nudgeDesc"), (x) =>
             x.addDropdown((d) => {
               for (const m of NUDGE_OPTIONS) d.addOption(String(m), m ? t("set.nudgeN", { n: m }) : t("set.nudgeOff"));
-              d.setValue(String(plugin.settings.nudgeMinutes)).onChange(async (v) => {
+              d.setValue(String(plugin.settings.nudgeMinutes)).onChange(actWith(async (v) => {
                 plugin.settings.nudgeMinutes = Number(v);
                 await save();
-              });
+              }));
             }),
           ),
         ],
@@ -241,39 +241,39 @@ export class QuestlogSettingTab extends PluginSettingTab {
           row(t("set.reviewDay"), "set.alias.reviewDay", undefined, (x) =>
             x.addDropdown((d) => {
               for (let i = 0; i < 7; i++) d.addOption(String(i), t(`wd.long.${i}` as "wd.long.0"));
-              d.setValue(String(plugin.settings.reviewDay)).onChange(async (v) => {
+              d.setValue(String(plugin.settings.reviewDay)).onChange(actWith(async (v) => {
                 plugin.settings.reviewDay = Number(v);
                 await save();
                 plugin.refreshViews();
-              });
+              }));
             }),
           ),
           row(t("set.weeklyQ"), "set.alias.weeklyQ", t("set.questionsDesc"), (x) =>
             x.addTextArea((c) => {
               c.inputEl.rows = 5;
-              c.setValue(weeklyQuestions(plugin.settings).join("\n")).onChange(async (v) => {
+              c.setValue(weeklyQuestions(plugin.settings).join("\n")).onChange(actWith(async (v) => {
                 plugin.settings.weeklyQuestions = linesOf(v);
                 await save();
-              });
+              }));
             }),
           ),
           row(t("set.monthlyQ"), "set.alias.monthlyQ", t("set.questionsDesc"), (x) =>
             x.addTextArea((c) => {
               c.inputEl.rows = 4;
-              c.setValue(monthlyQuestions(plugin.settings).join("\n")).onChange(async (v) => {
+              c.setValue(monthlyQuestions(plugin.settings).join("\n")).onChange(actWith(async (v) => {
                 plugin.settings.monthlyQuestions = linesOf(v);
                 await save();
-              });
+              }));
             }),
           ),
           row(t("set.checkinWeeks"), "set.alias.checkinWeeks", t("set.checkinWeeksDesc"), (x) =>
             x.addDropdown((d) => {
               for (let n = 2; n <= 8; n++) d.addOption(String(n), t("set.checkinWeeksN", { n }));
-              d.setValue(String(plugin.settings.checkinWeeks)).onChange(async (v) => {
+              d.setValue(String(plugin.settings.checkinWeeks)).onChange(actWith(async (v) => {
                 plugin.settings.checkinWeeks = Number(v);
                 await save();
                 plugin.refreshViews();
-              });
+              }));
             }),
           ),
         ],

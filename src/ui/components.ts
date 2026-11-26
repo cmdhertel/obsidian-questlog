@@ -20,6 +20,11 @@ export function act(fn: () => Promise<unknown>): () => void {
   };
 }
 
+/** `act` for callbacks that receive a value, such as `onChange` handlers. */
+export function actWith<T>(fn: (v: T) => Promise<unknown>): (v: T) => void {
+  return (v) => act(() => fn(v))();
+}
+
 export function iconButton(parent: HTMLElement, icon: string, label: string, onClick: () => void, cls = ""): HTMLButtonElement {
   const b = parent.createEl("button", { cls: `ql-icon-btn clickable-icon ${cls}`.trim(), attr: { "aria-label": label } });
   setIcon(b, icon);
@@ -272,7 +277,6 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
     const key = `task:${taskKey(task)}`;
     const open = ctx.state.expanded.has(key);
     text.addClass("ql-clamp");
-    text.style.setProperty("--ql-clamp", "3");
     text.toggleClass("is-open", open);
     const more = main.createEl("button", { cls: "ql-linkbtn ql-small ql-task-expand", attr: { "aria-expanded": String(open) } });
     const label = (isOpen: boolean) => {

@@ -1192,6 +1192,7 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
 .ql-ownwords-quote { margin: 0; }
 .ql-ownwords-quote blockquote { margin: 2px 0 0; padding: 0 0 0 10px; border-left: 3px solid var(--background-modifier-border); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ql-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--ql-clamp, 5); overflow: hidden; }
+.ql-task-text.ql-clamp { --ql-clamp: 3; }
 .ql-clamp.is-open { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .ql-linkbtn { background: transparent; box-shadow: none; border: none; padding: 2px 0; color: var(--text-accent); cursor: pointer; height: auto; }
 .ql-linkbtn:hover { text-decoration: underline; background: transparent; }

@@ -281,7 +281,9 @@ export class SessionModal extends Modal {
     };
     new Setting(this.contentEl).setName(t("session.quest")).addDropdown((d) => {
       for (const q of quests) d.addOption(q.name, q.kind === "other" ? t("other.name") : q.name);
-      pickQuest = (q) => d.setValue(q);
+      pickQuest = (q) => {
+        d.setValue(q);
+      };
       d.setValue(v.quest).onChange((s) => {
         v.quest = s;
         v.taskId = "";
