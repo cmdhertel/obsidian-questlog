@@ -94,6 +94,7 @@ export class StartBox extends SuggestModal<StartRow> {
     // On a phone "#quest" is awkward to type: a row under the field shows where new tasks go and changes it.
     const row = createDiv({ cls: "ql-sb-questrow" });
     this.inputEl.parentElement?.after(row);
+    this.modalEl.addClass("ql-sb-has-questrow");
     this.questBtn = row.createEl("button", { cls: "ql-sb-questbtn" });
     this.questBtn.onclick = () => {
       new QuestPicker(this.app, this.quests, (q) => {
