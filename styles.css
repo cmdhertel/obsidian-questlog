@@ -8,10 +8,12 @@
   --ql-color: var(--interactive-accent);
   --ql-card-bg: var(--background-secondary);
   --ql-border: var(--background-modifier-border);
-  padding: 0 !important;
+  padding: 0;
   display: flex;
   flex-direction: column;
 }
+/* Beats Obsidian's `.workspace-leaf-content .view-content` padding. */
+.workspace-leaf-content .view-content.questlog { padding: 0; }
 
 /* ---------------------------------------------------------------- tabs */
 
@@ -141,7 +143,9 @@
 .ql-btn-icon { display: inline-flex; }
 .ql-btn-icon svg { width: 15px; height: 15px; }
 .ql-btn.is-current { color: var(--text-accent); }
-.ql-btn-plain { background: transparent !important; box-shadow: none !important; padding: 4px 6px; color: var(--text-muted); }
+.ql-btn-plain { padding: 4px 6px; color: var(--text-muted); }
+/* Beats Obsidian's `button:not(.clickable-icon)` and its hover state. */
+.questlog button.ql-btn-plain:not(.clickable-icon) { background: transparent; box-shadow: none; }
 .ql-btn-plain:hover { color: var(--text-normal); }
 .ql-icon-btn { padding: 4px; }
 .ql-icon-btn.is-live { color: var(--ql-color, var(--text-accent)); }
@@ -335,7 +339,7 @@
 .ql-task:hover { border-color: var(--background-modifier-border-hover); border-left-color: var(--ql-color); }
 .ql-task.is-running { background: color-mix(in srgb, var(--ql-color) 10%, var(--background-primary)); }
 .ql-task.is-done { background: transparent; border-color: transparent; }
-.ql-task.is-done .ql-task-text { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--text-faint); }
+.ql-task.is-done .ql-task-text { color: var(--text-muted); text-decoration: line-through; }
 .ql-task.is-compact { min-height: 32px; padding: 2px 2px 2px 8px; gap: 6px; font-size: var(--font-ui-small); }
 .ql-task.is-draggable { cursor: grab; }
 .ql-task.is-dragging { opacity: 0.4; }
@@ -375,14 +379,14 @@
   border-radius: var(--ql-radius);
 }
 .ql-add:focus-within { border-style: solid; border-color: var(--background-modifier-border-focus); background: var(--background-primary); }
-.ql-add-input {
-  flex: 1;
-  min-width: 0;
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  padding: 4px 0 !important;
-  font-size: var(--font-ui-small) !important;
+.ql-add-input { flex: 1; min-width: 0; }
+/* Beats Obsidian's `input[type='text']` rules, including :hover and :focus. */
+.questlog .ql-add input.ql-add-input {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 4px 0;
+  font-size: var(--font-ui-small);
 }
 .ql-add-quest { flex: none; max-width: 40%; font-size: var(--font-ui-smaller); }
 .ql-add .ql-icon-btn svg { width: 15px; height: 15px; }
@@ -892,7 +896,7 @@
   width: auto;
   display: grid;
   grid-template-columns: 20px 1fr;
-  column-gap: 10px;
+  gap: 0 10px;
   align-items: start;
   text-align: left;
   padding: 0 0 10px;
@@ -1048,7 +1052,7 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
 .ql-ritual-text { flex: 1; min-width: 12em; }
 .ql-ritual-card { display: flex; flex-direction: column; gap: 10px; outline: none; }
 .ql-ritual-card:focus-visible { box-shadow: 0 0 0 2px var(--background-modifier-border-focus); }
-.ql-ritual-card .is-hidden { display: none !important; }
+.questlog .ql-ritual-card .is-hidden { display: none; }
 .ql-ritual-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
 .ql-ritual-title { margin: 0; font-size: var(--font-ui-medium); font-weight: var(--font-semibold); }
 .ql-ritual-sub { font-size: var(--font-ui-smaller); color: var(--text-faint); }
@@ -1095,8 +1099,11 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
 .ql-ritual-left > :first-child { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
 
 .ql-radio-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.ql-radio-chip {
-  position: relative;
+/* The input is invisible and the span right after it draws the chip, so its state needs no parent selector. */
+.ql-radio-chip { position: relative; display: inline-flex; cursor: pointer; }
+.ql-radio-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.ql-radio-chip > span {
+  flex: 1;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1105,14 +1112,12 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
   border-radius: 999px;
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
-  cursor: pointer;
   background: var(--background-primary);
 }
-.ql-radio-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
-.ql-radio-chip:has(input:checked) { border-color: var(--interactive-accent); color: var(--text-normal); background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary)); }
-.ql-radio-chip:has(input:focus-visible) { box-shadow: 0 0 0 2px var(--background-modifier-border-focus); }
+.ql-radio-chip input:checked + span { border-color: var(--interactive-accent); color: var(--text-normal); background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary)); }
+.ql-radio-chip input:focus-visible + span { box-shadow: 0 0 0 2px var(--background-modifier-border-focus); }
 .ql-radio-chip.is-disabled { opacity: 0.45; cursor: default; }
-.ql-radio-chips.is-days .ql-radio-chip { min-width: 2.6em; justify-content: center; }
+.ql-radio-chips.is-days .ql-radio-chip > span { min-width: 2.6em; justify-content: center; }
 
 .ql-w-narrow .ql-ritual-actions { justify-content: stretch; }
 .ql-w-narrow .ql-ritual-card .ql-ritual-actions > button { flex: 1 1 auto; }
@@ -1121,7 +1126,7 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
 @media (hover: none) {
   .ql-hcard-head, .ql-ritual-pick, .ql-ritual-also, .ql-radio-chip, .ql-ritual-actions button,
   .ql-ritual-row-actions button, .ql-ritual-link, .ql-hcard-none button { min-height: 44px; }
-  .ql-radio-chip { padding: 3px 14px; }
+  .ql-radio-chip > span { padding: 3px 14px; }
 }
 
 
@@ -1192,6 +1197,7 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
 .ql-ownwords-quote { margin: 0; }
 .ql-ownwords-quote blockquote { margin: 2px 0 0; padding: 0 0 0 10px; border-left: 3px solid var(--background-modifier-border); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ql-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--ql-clamp, 5); overflow: hidden; }
+.ql-task-text.ql-clamp { --ql-clamp: 3; }
 .ql-clamp.is-open { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .ql-linkbtn { background: transparent; box-shadow: none; border: none; padding: 2px 0; color: var(--text-accent); cursor: pointer; height: auto; }
 .ql-linkbtn:hover { text-decoration: underline; background: transparent; }
@@ -1213,7 +1219,8 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
 }
 .ql-w-wide .ql-board .ql-col { padding: var(--size-4-1) 6px var(--size-4-2); }
 .ql-col { container: ql-col / inline-size; }
-.ql-board [hidden], .ql-backlog-body[hidden] { display: none !important; }
+/* Specific enough to beat the display of every class in the board. */
+.questlog .ql-board [hidden], .questlog .ql-backlog-body[hidden] { display: none; }
 
 /* Rail and overlay: only on wide panes that are too small for the full board. */
 .ql-backlog-rail { display: none; }
@@ -1348,7 +1355,7 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
 /* Obsidian's phone navbar floats over the bottom of every view: keep the bar and the last lines clear of it. */
 .is-phone .questlog { --ql-navbar-space: calc(var(--navbar-height, 52px) + var(--navbar-bottom-offset, 0px) + 4px); }
 .is-phone .ql-foot { padding-bottom: var(--ql-navbar-space); }
-.is-phone .questlog:has(.ql-foot:empty) .ql-body { padding-bottom: calc(var(--size-4-8) + var(--ql-navbar-space)); }
+.is-phone .questlog.ql-no-foot .ql-body { padding-bottom: calc(var(--size-4-8) + var(--ql-navbar-space)); }
 .ql-foot:empty { display: none; }
 .ql-capturebar {
   display: grid;
@@ -1383,12 +1390,12 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
 }
 .ql-capture-btn:disabled { opacity: 0.55; cursor: default; }
 /* The keyboard is up: the bar would sit on top of it. */
-.questlog:has(input:focus, textarea:focus, select:focus) .ql-capturebar { display: none; }
+.questlog.is-typing .ql-capturebar { display: none; }
 
 /* Start box quest row on a phone */
 /* The phone prompt puts its field at the bottom (order 3): the row sits right above it, in thumb reach. */
 .ql-sb-questrow { order: 2; margin-top: auto; padding: var(--size-4-2) var(--size-4-3); }
-.prompt:has(.ql-sb-questrow) .prompt-input-container { margin-top: 0; }
+.prompt.ql-sb-has-questrow .prompt-input-container { margin-top: 0; }
 .ql-sb-questbtn {
   display: inline-flex;
   align-items: center;
@@ -1413,7 +1420,7 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
   .ql-collapse-head, .ql-next-row { min-height: 44px; }
   .ql-check-hit { min-width: 44px; min-height: 44px; margin: -10px -8px -10px -10px; }
   .ql-cal-strip { grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 2px; overflow-x: auto; scrollbar-width: none; }
-  .questlog .ql-add-input { font-size: 16px !important; }
+  .questlog .ql-add input.ql-add-input { font-size: 16px; }
   .questlog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   .questlog textarea,
   .questlog select,

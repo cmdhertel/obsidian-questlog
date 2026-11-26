@@ -134,6 +134,13 @@ export class QuestlogView extends ItemView {
     this.tabsEl = root.createDiv({ cls: "ql-tabs", attr: { role: "tablist" } });
     this.bodyEl = root.createDiv({ cls: "ql-body" });
     this.footEl = root.createDiv({ cls: "ql-foot" });
+    // On a phone the keyboard is up while a field has focus: CSS hides the capture bar, it would sit on top of it.
+    const typingIn = (target: EventTarget | null) => {
+      const el = target as Element | null;
+      root.toggleClass("is-typing", !!el && root.contains(el) && el.matches("input, textarea, select"));
+    };
+    this.registerDomEvent(root, "focusin", (e: FocusEvent) => typingIn(e.target));
+    this.registerDomEvent(root, "focusout", (e: FocusEvent) => typingIn(e.relatedTarget));
     // Don't re-render under the user's cursor; catch up when they leave the field.
     this.registerDomEvent(root, "focusout", () => {
       root.win.setTimeout(() => {
@@ -283,6 +290,7 @@ export class QuestlogView extends ItemView {
     RENDER[this.tab](this.bodyEl.createDiv({ cls: `ql-page ql-page-${this.tab}` }), ctx);
     this.footEl.empty();
     captureBar(this.footEl, ctx, this.tab === "focus");
+    this.contentEl.toggleClass("ql-no-foot", !this.footEl.hasChildNodes());
     this.bodyEl.scrollTop = scroll;
     for (const [key, left] of boards) {
       const el = this.bodyEl.querySelector<HTMLElement>(`[data-scroll-key="${key}"]`);
