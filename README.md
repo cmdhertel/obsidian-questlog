@@ -78,7 +78,8 @@ Each ritual is also a command, so you can open it at any time. **Not now** hides
 - **Start or stop the focus timer**
 - **Complete the running task**
 - **Add a task**
-- **Toggle zen mode**
+- **Toggle zen mode**: only the task and the clock, inside the pane
+- **Toggle fullscreen mode**: the same, fullscreen (desktop)
 - **Start the day**, **Close the day**, **Plan the week**, **Quest check-in**
 
 No command has a default hotkey; assign your own under **Settings → Hotkeys**.

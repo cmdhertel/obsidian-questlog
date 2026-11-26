@@ -1,5 +1,5 @@
 // Focus: one task on screen, a big clock with an optional time box, a session note, and what comes next.
-import { setIcon } from "obsidian";
+import { Platform, setIcon } from "obsidian";
 import { fmtDuration, fmtHours, isoDay } from "../../data/dates";
 import { totalMinutes } from "../../data/stats";
 import type { Task } from "../../data/model";
@@ -22,7 +22,7 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
 
   if (state.zen) {
     if (task || running) return renderZen(el, ctx, task);
-    ctx.view.setZen(false);
+    ctx.view.setZen(null);
     return;
   }
 
@@ -41,7 +41,9 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
   const quest = task ? store.questOf(task) : store.quest(running?.quest ?? "");
   stage.style.setProperty("--ql-color", quest?.color ?? "var(--interactive-accent)");
 
-  iconButton(stage, "maximize-2", t("focus.zen"), () => ctx.view.setZen(true), "ql-focus-zen-btn");
+  const modes = stage.createDiv({ cls: "ql-focus-modes" });
+  iconButton(modes, "focus", t("focus.zen"), () => ctx.view.setZen("zen"));
+  if (Platform.isDesktopApp) iconButton(modes, "maximize-2", t("focus.fullscreen"), () => ctx.view.setZen("fullscreen"));
 
   // A quest-only run has the quest name as its title, so the small quest row above it is left out.
   const qname = questName(quest, running?.quest ?? "");
@@ -154,7 +156,7 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
   footer(el, ctx);
 }
 
-/** Zen mode: only the task and the clock, plus a quiet row of controls. */
+/** Zen and fullscreen mode: only the task and the clock, plus a quiet row of controls. */
 function renderZen(el: HTMLElement, ctx: Ctx, task: Task | undefined): void {
   const { store, plugin, state } = ctx;
   const running = plugin.settings.timer;
@@ -180,7 +182,8 @@ function renderZen(el: HTMLElement, ctx: Ctx, task: Task | undefined): void {
       await plugin.complete(task);
     }));
   }
-  iconButton(row, "minimize-2", t("focus.zenExit"), () => ctx.view.setZen(false));
+  if (state.zen === "fullscreen") iconButton(row, "minimize-2", t("focus.fullscreenExit"), () => ctx.view.setZen(null));
+  else iconButton(row, "x", t("focus.zenExit"), () => ctx.view.setZen(null));
 }
 
 /** "Continue: <title>" for the last work; nothing when there is nothing to resume or Start already does it. */
