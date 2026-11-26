@@ -63,8 +63,8 @@ export interface UiState {
   focusTask: string | null;
   focusBox: number;
   focusNote: string;
-  /** Zen mode: Focus shows only the clock and the task. */
-  zen: boolean;
+  /** Focus shows only the clock and the task: in the pane ("zen") or fullscreen; null = the normal Focus page. */
+  zen: ZenMode | null;
   /** Ritual card open on Home (#18); null = the one-line suggestion, if any. */
   ritual: OpenRitual | null;
   /** A quiet line on Home after a ritual finished ("Day closed."), until the tab changes. */
@@ -77,6 +77,9 @@ export interface UiState {
 }
 
 export type Width = "wide" | "mid" | "narrow";
+
+/** "zen": the minimal Focus view inside the pane. "fullscreen": the same view, fullscreen (desktop only). */
+export type ZenMode = "zen" | "fullscreen";
 
 export class QuestlogView extends ItemView {
   private tab: TabId;
@@ -106,7 +109,7 @@ export class QuestlogView extends ItemView {
       focusTask: null,
       focusBox: plugin.settings.pomodoroMinutes,
       focusNote: "",
-      zen: false,
+      zen: null,
       ritual: null,
       ritualNote: null,
       backlogQuest: null,
@@ -147,35 +150,42 @@ export class QuestlogView extends ItemView {
         if (!this.closed && this.deferred && !this.isEditing()) this.refresh();
       }, 50);
     });
-    // Leaving fullscreen (Esc in the browser, window controls) also leaves zen mode.
+    // Leaving fullscreen (Esc in the browser, window controls) also leaves fullscreen mode.
     this.registerDomEvent(root, "fullscreenchange", () => {
-      if (this.state.zen && this.contentEl.doc.fullscreenElement !== this.contentEl) this.setZen(false);
+      if (this.state.zen === "fullscreen" && this.contentEl.doc.fullscreenElement !== this.contentEl) this.setZen(null);
     });
     this.registerDomEvent(root, "keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape" && this.state.zen) {
         e.preventDefault();
-        this.setZen(false);
+        this.setZen(null);
       }
     });
     this.updateWidth();
     this.refresh();
   }
 
-  /** Turn zen mode on or off. On desktop the view also goes fullscreen. */
-  setZen(on: boolean): void {
-    if (this.state.zen === on) return;
-    this.state.zen = on;
-    this.contentEl.toggleClass("is-zen", on);
-    if (on) {
-      if (Platform.isDesktopApp && !this.contentEl.doc.fullscreenElement) {
-        this.contentEl.requestFullscreen?.().catch(() => undefined);
+  /**
+   * Switch between the normal Focus page (null), zen mode in the pane and fullscreen mode.
+   * Fullscreen needs the desktop app; elsewhere, or when the request is refused, it falls back to zen.
+   */
+  setZen(mode: ZenMode | null): void {
+    if (mode === "fullscreen" && !Platform.isDesktopApp) mode = "zen";
+    if (this.state.zen === mode) return;
+    this.state.zen = mode;
+    this.contentEl.toggleClass("is-zen", !!mode);
+    const doc = this.contentEl.doc;
+    if (mode === "fullscreen") {
+      if (doc.fullscreenElement !== this.contentEl) {
+        void this.contentEl.requestFullscreen().catch(() => {
+          if (this.state.zen === "fullscreen") this.setZen("zen");
+        });
       }
-      if (this.tab !== "focus") return this.showTab("focus");
-    } else if (this.contentEl.doc.fullscreenElement === this.contentEl) {
-      void this.contentEl.doc.exitFullscreen().catch(() => undefined);
+    } else if (doc.fullscreenElement === this.contentEl) {
+      void doc.exitFullscreen().catch(() => undefined);
     }
+    if (mode && this.tab !== "focus") return this.showTab("focus");
     this.render();
-    if (on) this.contentEl.focus();
+    if (mode) this.contentEl.focus();
   }
 
   onResize(): void {
@@ -202,7 +212,7 @@ export class QuestlogView extends ItemView {
 
   showTab(tab: TabId): void {
     if (tab !== "focus" && this.state.zen) {
-      this.state.zen = false;
+      this.state.zen = null;
       this.contentEl.removeClass("is-zen");
       if (this.contentEl.doc.fullscreenElement === this.contentEl) void this.contentEl.doc.exitFullscreen().catch(() => undefined);
     }
@@ -285,7 +295,7 @@ export class QuestlogView extends ItemView {
       taskMinutes: minutesByTask(this.plugin.store.allSessions()),
       rerender: () => this.render(),
     };
-    this.contentEl.toggleClass("is-zen", this.state.zen && this.tab === "focus");
+    this.contentEl.toggleClass("is-zen", !!this.state.zen && this.tab === "focus");
     if (this.tab !== "focus") timerBar(this.bodyEl, ctx);
     RENDER[this.tab](this.bodyEl.createDiv({ cls: `ql-page ql-page-${this.tab}` }), ctx);
     this.footEl.empty();

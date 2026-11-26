@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS, QuestlogSettingTab, mergeSettings, type QuestlogSetti
 import { Timer } from "./timer";
 import { workTitle } from "./data/timerlog";
 import { act, questName } from "./ui/components";
-import { QuestlogView, VIEW_TYPE, type OpenRitual } from "./ui/view";
+import { QuestlogView, VIEW_TYPE, type OpenRitual, type ZenMode } from "./ui/view";
 import { closeDayTarget, ritualTarget } from "./ui/ritual";
 import { StartBox, continueTitle } from "./ui/startbox";
 import { t } from "./i18n";
@@ -101,17 +101,21 @@ export default class QuestlogPlugin extends Plugin {
       name: t("cmd.addTask"),
       callback: () => new StartBox(this, "add").open(),
     });
-    this.addCommand({
-      id: "zen-mode",
-      name: t("cmd.zen"),
-      callback: async () => {
-        const open = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
-        const on = !(open instanceof QuestlogView && open.state.zen);
-        await this.openView("focus");
-        const view = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
-        if (view instanceof QuestlogView) view.setZen(on);
-      },
-    });
+    // Zen: the minimal Focus view in the pane. Fullscreen: the same view, fullscreen (desktop only).
+    const zenCommand = (id: string, name: string, mode: ZenMode) =>
+      this.addCommand({
+        id,
+        name,
+        callback: async () => {
+          const open = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
+          const on = !(open instanceof QuestlogView && open.state.zen === mode);
+          await this.openView("focus");
+          const view = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
+          if (view instanceof QuestlogView) view.setZen(on ? mode : null);
+        },
+      });
+    zenCommand("zen-mode", t("cmd.zen"), "zen");
+    if (Platform.isDesktopApp) zenCommand("fullscreen-mode", t("cmd.fullscreen"), "fullscreen");
     // Rituals (#18): no hotkeys; each opens Home and the card, whatever the time and dismissals.
     const ritual = (id: string, name: string, target: () => Omit<OpenRitual, "step"> | null) =>
       this.addCommand({

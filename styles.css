@@ -762,14 +762,14 @@
 }
 .is-mobile .ql-task .ql-task-actions .ql-icon-btn { opacity: 1; }
 
-/* ── Zen mode: only the task and the clock ── */
+/* ── Zen and fullscreen mode: only the task and the clock ── */
 .questlog.is-zen { background: var(--background-primary); }
 .questlog.is-zen .ql-tabs { display: none; }
 .questlog.is-zen .ql-body { display: flex; flex-direction: column; height: 100%; }
 .questlog.is-zen .ql-page-focus { flex: 1; display: flex; max-width: none; }
 .questlog:focus { outline: none; }
 .ql-focus { position: relative; }
-.ql-focus-zen-btn { position: absolute; top: 8px; right: 8px; }
+.ql-focus-modes { position: absolute; top: 8px; right: 8px; display: flex; gap: var(--size-4-1); }
 .ql-zen {
   flex: 1;
   min-height: 60vh;
