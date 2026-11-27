@@ -11,6 +11,7 @@ import type { ContinueTarget } from "../../data/lastwork";
 import { act, addTaskField, bar, button, dayHint, empty, iconButton, pageHead, pill, playButton, questIcon, sectionHead, segmented, statCard, taskRow } from "../components";
 import { addStageDialog, compassLine, renderStagePath, stageLabel } from "../stagepath";
 import { weekDotsView } from "../dots";
+import { isOn } from "../../settings";
 import { renderStory } from "../story";
 
 /** Sessions grouped by quest name, read once per render. */
@@ -93,8 +94,9 @@ function card(parent: HTMLElement, ctx: Ctx, q: Quest, weekMin: number, allMin: 
   title.createDiv({ cls: "ql-qcard-name", text: q.name });
   if (q.status === "paused") pill(title, t("quests.paused"), { cls: "is-muted" });
   playButton(head, ctx, questTarget(ctx, q), { running: ctx.plugin.timer.isRunningForQuest(q.name), cls: "ql-qcard-play" });
-  c.createDiv({ cls: "ql-qcard-why" + (q.why ? "" : " is-missing"), text: q.why || t("quest.noWhy") });
-  if (q.stages.length) {
+  const on = ctx.plugin.settings;
+  if (q.why && isOn(on, "vision")) c.createDiv({ cls: "ql-qcard-why", text: q.why });
+  if (q.stages.length && isOn(on, "stages")) {
     const cur = currentStage(q.stages);
     c.createDiv({
       cls: "ql-qcard-stage",
@@ -105,7 +107,7 @@ function card(parent: HTMLElement, ctx: Ctx, q: Quest, weekMin: number, allMin: 
 
   const openTasks = q.tasks.filter((x) => !x.done).length;
   const foot = c.createDiv({ cls: "ql-qcard-foot" });
-  if (q.status !== "done" && q.weeklyHours) {
+  if (q.status !== "done" && q.weeklyHours && isOn(on, "hours")) {
     const w = foot.createDiv({ cls: "ql-qcard-week" });
     const l = w.createDiv({ cls: "ql-qcard-week-label" });
     l.createSpan({ text: t("quests.thisWeek") });
@@ -141,7 +143,7 @@ function renderDetail(el: HTMLElement, ctx: Ctx, q: Quest): void {
   questIcon(head, q, "is-large");
   const titles = head.createDiv({ cls: "ql-page-titles" });
   titles.createEl("h2", { cls: "ql-page-title", text: q.name });
-  titles.createDiv({ cls: "ql-qcard-why" + (q.why ? "" : " is-missing"), text: q.why || t("quest.noWhy") });
+  if (q.why && isOn(plugin.settings, "vision")) titles.createDiv({ cls: "ql-qcard-why", text: q.why });
 
   const actions = head.createDiv({ cls: "ql-page-actions" });
   playButton(actions, ctx, questTarget(ctx, q), { text: true, running: plugin.timer.isRunningForQuest(q.name), cls: "mod-cta" });
@@ -163,16 +165,18 @@ function renderDetail(el: HTMLElement, ctx: Ctx, q: Quest): void {
   const allMin = totalMinutes(mine);
   const doneN = q.tasks.filter((x) => x.done).length;
   const stats = page.createDiv({ cls: "ql-stats" });
+  const target = isOn(plugin.settings, "hours") ? q.weeklyHours : 0;
   statCard(stats, t("quests.thisWeek"), fmtHours(weekMin), {
     icon: "timer",
-    sub: q.weeklyHours ? `/ ${q.weeklyHours}h` : undefined,
-    progress: q.weeklyHours ? [weekMin, q.weeklyHours * 60] : undefined,
+    sub: target ? `/ ${target}h` : undefined,
+    progress: target ? [weekMin, target * 60] : undefined,
     color: q.color,
   });
   statCard(stats, t("quest.totalTime"), fmtHours(allMin), { icon: "hourglass" });
   statCard(stats, t("quest.progress"), `${doneN}/${q.tasks.length}`, { icon: "check-circle-2", progress: [doneN, Math.max(1, q.tasks.length)], color: q.color });
 
-  if (q.kind === "quest") {
+  const stagesOn = isOn(plugin.settings, "stages");
+  if (q.kind === "quest" && stagesOn) {
     segmented(
       page,
       [
@@ -188,7 +192,8 @@ function renderDetail(el: HTMLElement, ctx: Ctx, q: Quest): void {
     if (state.questView === "story") return renderStory(page, ctx, q, mine);
   }
 
-  const hasStages = q.stages.length > 0;
+  // With stages off, the stage path is hidden and every open task is listed.
+  const hasStages = stagesOn && q.stages.length > 0;
   if (hasStages) renderStagePath(page, ctx, q, mine);
 
   // Open tasks: all of them without stages, only the loose ones with stages.
@@ -205,7 +210,7 @@ function renderDetail(el: HTMLElement, ctx: Ctx, q: Quest): void {
     if (!openTasks.length) empty(list, t("home.questEmpty"), "list-checks");
     // With a current stage, new tasks go there; the loose list has no field of its own then.
     if (q.status !== "done" && (!hasStages || noCurrent)) addTaskField(tc, ctx, { quest: q, day: null, stateKey: `quest-${q.path}` });
-    if (!hasStages && q.kind === "quest") {
+    if (!hasStages && stagesOn && q.kind === "quest") {
       const b = button(tc, t("stage.addFirst"), () => addStageDialog(ctx, q), { icon: "milestone", cls: "ql-btn-plain ql-stage-first" });
       b.dataset.stageFocus = `${q.path}:add`;
     }

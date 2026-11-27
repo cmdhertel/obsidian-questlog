@@ -3,7 +3,7 @@ import { Platform, setIcon } from "obsidian";
 import { fmtDuration, fmtHours, isoDay } from "../../data/dates";
 import { totalMinutes } from "../../data/stats";
 import type { Task } from "../../data/model";
-import { TIME_BOXES } from "../../settings";
+import { TIME_BOXES, isOn } from "../../settings";
 import { workTitle } from "../../data/timerlog";
 import { t } from "../../i18n";
 import type { Ctx } from "../ctx";
@@ -32,7 +32,7 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
     empty(stage, store.doneOn(today).length ? t("focus.allDone") : t("focus.nothing"), "target");
     const row = stage.createDiv({ cls: "ql-focus-actions" });
     button(row, t("focus.pick"), () => new TaskSuggestModal(plugin, (x) => pick(ctx, x)).open(), { icon: "search", cta: true });
-    button(row, t("tab.plan"), () => ctx.view.showTab("plan"), { icon: "list-checks" });
+    if (isOn(plugin.settings, "plan")) button(row, t("tab.plan"), () => ctx.view.showTab("plan"), { icon: "list-checks" });
     continueButton(row, ctx);
     footer(el, ctx);
     return;
@@ -53,7 +53,7 @@ export function renderFocus(el: HTMLElement, ctx: Ctx): void {
     if (quest) questIcon(qrow, quest, "is-small");
     qrow.createSpan({ text: qname });
   }
-  if (quest?.why) stage.createDiv({ cls: "ql-focus-why", text: quest.why });
+  if (quest?.why && isOn(plugin.settings, "vision")) stage.createDiv({ cls: "ql-focus-why", text: quest.why });
   stage.createDiv({ cls: "ql-focus-task", text: title });
 
   // Clock: live while running (counts down within a box), otherwise the box length or 00:00.

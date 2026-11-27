@@ -538,7 +538,6 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.ql-qcard-why.is-missing { color: var(--text-faint); font-style: italic; }
 .ql-qcard-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .ql-qcard-week { display: flex; flex-direction: column; gap: 4px; }
 .ql-qcard-week-label { display: flex; justify-content: space-between; gap: 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); }

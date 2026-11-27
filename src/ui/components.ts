@@ -6,6 +6,7 @@ import type { Position } from "../data/plan";
 import { fmtDate, t } from "../i18n";
 import type { Ctx } from "./ctx";
 import { workTitle } from "../data/timerlog";
+import { moduleOn } from "../data/modules";
 import { ConfirmModal, TextModal } from "./modals";
 
 const DRAG_TYPE = "application/x-questlog-task";
@@ -391,7 +392,7 @@ function taskMenu(ctx: Ctx, task: Task, quest: Quest | undefined): Menu {
       }),
     );
   }
-  if (quest?.stages.length) {
+  if (quest?.stages.length && moduleOn(plugin.settings.modules, "stages")) {
     m.addSeparator();
     m.addItem((i) => i.setTitle(t("stage.moveTask")).setIsLabel(true));
     for (const s of quest.stages) {

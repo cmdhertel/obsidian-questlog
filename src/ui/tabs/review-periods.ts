@@ -6,7 +6,7 @@ import type { Quest, Session, Task } from "../../data/model";
 import { OTHER_COLOR } from "../../data/store";
 import { daysOf, monthsIn, parsePeriodId, periodId, periodRange, scaleTarget, shiftPeriod, weeksInRange, type Period, type Range } from "../../data/periods";
 import { monthTargets, previousMonthHours } from "../../data/review-month";
-import { weeklyTargetHours, type QuestlogSettings } from "../../settings";
+import { isOn, weeklyTargetHours, type QuestlogSettings } from "../../settings";
 import { fmtDate, t, type Key } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { bar, button, empty, iconButton, pageHead, questIcon, sectionHead, segmented, statCard } from "../components";
@@ -47,7 +47,9 @@ const LABEL: Record<Period, Key> = { week: "review.week", month: "review.month",
 
 /** Week plus every registered period, as a tablist in the page head; hidden while only the week exists. */
 export function periodSwitch(parent: HTMLElement, ctx: Ctx): void {
-  const periods: Period[] = ["week", ...(["month", "quarter", "year"] as const).filter((p) => PERIOD_CONFIG[p])];
+  // With the longer reviews off there is only the week, so no switch.
+  const longer = isOn(ctx.plugin.settings, "longReviews") ? (["month", "quarter", "year"] as const).filter((p) => PERIOD_CONFIG[p]) : [];
+  const periods: Period[] = ["week", ...longer];
   if (periods.length < 2) return;
   const s = segmented(
     parent,

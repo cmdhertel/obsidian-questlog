@@ -8,6 +8,7 @@ import { pickRitual, weekToPlan, type RitualId, type RitualInput } from "../data
 import { totalMinutes } from "../data/stats";
 import type QuestlogPlugin from "../main";
 import { fmtDate, t } from "../i18n";
+import { isOn } from "../settings";
 import type { Ctx } from "./ctx";
 import { act, button } from "./components";
 import { dayGaps } from "./timeline";
@@ -17,7 +18,7 @@ import { renderCloseDay } from "./rituals/close-day";
 import { renderPlanWeek } from "./rituals/plan-week";
 import { renderCheckin } from "./rituals/checkin";
 
-/** The quest a check-in would ask about, with its quiet weeks; null when none qualifies. */
+/** The quest a check-in would ask about, with its quiet weeks; null when none qualifies. Quests without an hour target are never asked about. */
 export function checkinQuestFor(plugin: QuestlogPlugin, today: string): { quest: Quest; weeks: number } | null {
   const { store } = plugin;
   const byQuest = new Map<string, { day: string; start: number; end: number }[]>();
@@ -28,7 +29,7 @@ export function checkinQuestFor(plugin: QuestlogPlugin, today: string): { quest:
   }
   const cands = store
     .activeQuests()
-    .filter((q) => q.kind === "quest")
+    .filter((q) => q.kind === "quest" && q.weeklyHours > 0)
     .map((q) => {
       const sessions = byQuest.get(q.name) ?? [];
       let first: string | null = null;
@@ -66,13 +67,19 @@ export function buildRitualInput(plugin: QuestlogPlugin, now = new Date()): Ritu
     hasPlanHours: (w) => store.planHours(w) !== null,
     checkinQuest: checkinQuestFor(plugin, today)?.quest.name ?? null,
     dismissed: plugin.settings.rituals,
+    enabled: {
+      start: isOn(plugin.settings, "ritualStart"),
+      close: isOn(plugin.settings, "ritualClose"),
+      week: isOn(plugin.settings, "ritualWeek"),
+      checkin: isOn(plugin.settings, "ritualCheckin"),
+    },
   };
 }
 
-/** The day `ritual-close-day` closes: yesterday when the line would offer that now, else today. */
+/** The day `ritual-close-day` closes: yesterday when the line would offer that now, else today. The command works with the ritual off too. */
 export function closeDayTarget(plugin: QuestlogPlugin, now = new Date()): string {
   const input = buildRitualInput(plugin, now);
-  const open = pickRitual({ ...input, dismissed: { start: null, close: null, week: null, checkin: null } });
+  const open = pickRitual({ ...input, enabled: undefined, dismissed: { start: null, close: null, week: null, checkin: null } });
   return open === "close-yesterday" ? addDays(input.today, -1) : input.today;
 }
 

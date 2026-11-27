@@ -4,6 +4,7 @@ import { fmtDuration, fmtHours, isoWeek, parseDay } from "../data/dates";
 import { minutesByWeekStart, weekDots, type Dot, type DotsSummary } from "../data/dots";
 import type { Quest, Session } from "../data/model";
 import { fmtDate, t } from "../i18n";
+import { isOn } from "../settings";
 import type { Ctx } from "./ctx";
 
 function dotTip(d: Dot): string {
@@ -24,8 +25,12 @@ function summaryText(s: DotsSummary): string {
   return t("dots.count", { n: s.weeks, of: s.of });
 }
 
-/** `sessions` are the sessions of this quest only. Renders nothing for done quests or quests without a start. */
+/**
+ * `sessions` are the sessions of this quest only. Renders nothing for done quests, quests without a start, and
+ * quests without an hour target (or with hour targets switched off).
+ */
 export function weekDotsView(parent: HTMLElement, ctx: Ctx, q: Quest, sessions: Session[]): HTMLElement | null {
+  if (!q.weeklyHours || !isOn(ctx.plugin.settings, "hours")) return null;
   let first: string | null = null;
   for (const s of sessions) if (!first || s.day < first) first = s.day;
   const { dots, summary } = weekDots({

@@ -6,7 +6,7 @@ import type { Quest, Session, Task } from "../../data/model";
 import { currentStage } from "../../data/stages";
 import { nextTaskFor } from "../../data/home";
 import { questFocusTasks } from "../../data/rituals";
-import { weeklyTargetHours } from "../../settings";
+import { isOn, weeklyTargetHours } from "../../settings";
 import { fmtDate, t } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { QuestModal } from "../modals";
@@ -49,7 +49,7 @@ export function renderHome(el: HTMLElement, ctx: Ctx): void {
   headStat(stats, target ? `${fmtHours(weekQuestMin)} / ${target}h` : fmtHours(weekQuestMin), t("home.week"));
 
   // 2. Vision
-  const vision = store.visionText();
+  const vision = isOn(plugin.settings, "vision") ? store.visionText() : "";
   if (vision) el.createDiv({ cls: "ql-vision", text: vision });
 
   // 3. Ritual line or card (#18); collapses when empty.
@@ -165,8 +165,9 @@ function questCard(parent: HTMLElement, ctx: Ctx, q: Quest, todayTasks: Task[], 
   questIcon(head, q);
   const title = head.createDiv({ cls: "ql-hcard-title" });
   title.createDiv({ cls: "ql-hcard-name", text: q.name });
-  const cur = q.stages.length ? currentStage(q.stages) : null;
-  if (q.stages.length) {
+  const stages = isOn(plugin.settings, "stages") && q.stages.length > 0;
+  const cur = stages ? currentStage(q.stages) : null;
+  if (stages) {
     title.createDiv({
       cls: "ql-hcard-stage",
       text: cur ? t("quest.stageOf", { i: cur.index + 1, n: q.stages.length, name: stageLabel(cur) }) : t("stage.allReached"),

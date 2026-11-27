@@ -14,6 +14,7 @@ import { fmClock, leftovers } from "./rituals";
 import { parsePlanHours, renameKey } from "./plan-hours";
 import { CHECKIN_HEADINGS, checkinLine, type CheckinAction } from "./checkin";
 import { parsePeriodId, type Period } from "./periods";
+import { moduleOn } from "./modules";
 import type { DayLog, Quest, QuestStatus, Review, Session, Span, Task, VisionNote } from "./model";
 
 export const PALETTE = ["#7c6cf0", "#2f9e8f", "#e0823d", "#d04f7a", "#4a90d9", "#8a9a3b", "#b4637a", "#c9a227"];
@@ -790,8 +791,9 @@ export class QuestStore extends Events {
     this.days.set(day, cur);
   }
 
-  /** Hours planned for a quest in an ISO week: the week's `plan_hours` entry, else `weekly_hours`. */
+  /** Hours planned for a quest in an ISO week: the week's `plan_hours` entry, else `weekly_hours`; 0 when hour targets are off. */
   weekTarget(quest: Pick<Quest, "name" | "weeklyHours">, week: string): number {
+    if (!moduleOn(this.settings().modules, "hours")) return 0;
     const h = this.reviews.get(week)?.planHours?.[quest.name];
     return typeof h === "number" && Number.isFinite(h) ? h : quest.weeklyHours;
   }

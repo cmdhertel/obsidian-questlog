@@ -2,7 +2,7 @@
 import { fmtHours, parseDay } from "../../data/dates";
 import { stagesReachedIn } from "../../data/review-month";
 import { stageMinutes } from "../../data/stagehours";
-import { monthlyQuestions } from "../../settings";
+import { isOn, monthlyQuestions } from "../../settings";
 import { fmtDate, t } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { empty, questIcon, sectionHead } from "../components";
@@ -19,6 +19,7 @@ export const MONTH: PeriodConfig = {
   doneList: true,
   summary: (ctx, info) => ({ stages_reached: reached(ctx, info).length }),
   extras(el, ctx, info) {
+    if (!isOn(ctx.plugin.settings, "stages")) return;
     const { store } = ctx;
     const list = reached(ctx, info);
     const card = el.createDiv({ cls: "ql-card ql-section" });

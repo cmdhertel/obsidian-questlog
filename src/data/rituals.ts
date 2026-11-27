@@ -37,6 +37,8 @@ export interface RitualInput {
   /** Name of the quest a check-in would ask about, or null. */
   checkinQuest: string | null;
   dismissed: Dismissed;
+  /** Rituals switched on in the settings; a missing entry counts as on. */
+  enabled?: Partial<Record<keyof Dismissed, boolean>>;
 }
 
 /** The week the planning ritual plans: the coming one once this week's review is answered, else this one. */
@@ -52,16 +54,17 @@ function planDue(i: RitualInput): boolean {
   return !i.hasPlanHours(isoWeek(i.today)) && !i.hasPlanHours(isoWeek(addDays(i.today, 7)));
 }
 
-/** At most one ritual, by the decision table of #18; a dismissed row is skipped. */
+/** At most one ritual, by the decision table of #18; a dismissed or switched-off row is skipped. */
 export function pickRitual(i: RitualInput): RitualId | null {
   const yesterday = addDays(i.today, -1);
   const d = i.dismissed;
+  const on = (k: keyof Dismissed) => i.enabled?.[k] !== false;
   const morning = i.nowMin < MORNING_UNTIL;
-  if (i.nowMin >= CLOSE_FROM && i.todayHasSessions && !i.todayClosed && d.close !== i.today) return "close-day";
-  if (morning && i.yesterdayHasSessions && !i.yesterdayClosed && i.yesterdayHasGaps && d.close !== yesterday) return "close-yesterday";
-  if (morning && !i.todayStarted && d.start !== i.today) return "start-day";
-  if (planDue(i) && d.week !== isoWeek(i.today)) return "plan-week";
-  if (i.checkinQuest && d.checkin !== i.today) return "check-in";
+  if (on("close") && i.nowMin >= CLOSE_FROM && i.todayHasSessions && !i.todayClosed && d.close !== i.today) return "close-day";
+  if (on("close") && morning && i.yesterdayHasSessions && !i.yesterdayClosed && i.yesterdayHasGaps && d.close !== yesterday) return "close-yesterday";
+  if (on("start") && morning && !i.todayStarted && d.start !== i.today) return "start-day";
+  if (on("week") && planDue(i) && d.week !== isoWeek(i.today)) return "plan-week";
+  if (on("checkin") && i.checkinQuest && d.checkin !== i.today) return "check-in";
   return null;
 }
 

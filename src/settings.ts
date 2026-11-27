@@ -1,9 +1,10 @@
-import { App, PluginSettingTab, Setting, normalizePath, type SettingDefinition, type SettingDefinitionItem } from "obsidian";
+import { App, PluginSettingTab, Setting, normalizePath, type DropdownComponent, type SettingDefinition, type SettingDefinitionItem, type ToggleComponent } from "obsidian";
 import type QuestlogPlugin from "./main";
 import type { LastWork, Quest, RunningTimer } from "./data/model";
 import { mergeSettings, pickQuestions } from "./data/settings-merge";
 import type { Period } from "./data/periods";
 import { NUDGE_OPTIONS } from "./data/nudge";
+import { MODULES, PRESETS, PRESET_IDS, moduleOn, presetOf, type ModuleId, type Modules, type Preset } from "./data/modules";
 import { t, type Key } from "./i18n";
 import { act, actWith } from "./ui/components";
 import { VisionModal } from "./ui/modals";
@@ -39,6 +40,8 @@ export interface QuestlogSettings {
   lastWork: LastWork | null;
   /** Calendar layout: one day, the week, or "auto" (one day on narrow panes, else the week). */
   calendarView: "auto" | "day" | "week";
+  /** Which modules are shown; off only hides, the data stays. */
+  modules: Modules;
 }
 
 export const DEFAULT_SETTINGS: QuestlogSettings = {
@@ -59,7 +62,22 @@ export const DEFAULT_SETTINGS: QuestlogSettings = {
   nudgeMinutes: 15,
   lastWork: null,
   calendarView: "auto",
+  modules: { ...PRESETS.standard },
 };
+
+/** Whether a module is on. */
+export function isOn(s: QuestlogSettings, id: ModuleId): boolean {
+  return moduleOn(s.modules, id);
+}
+
+/** The tabs a module hides; the rest are always shown. */
+const TAB_MODULE: Partial<Record<TabId, ModuleId>> = { plan: "plan", calendar: "calendar", review: "review" };
+
+/** Whether a tab is shown. */
+export function tabOn(s: QuestlogSettings, tab: TabId): boolean {
+  const m = TAB_MODULE[tab];
+  return !m || isOn(s, m);
+}
 
 export const TIME_BOXES = [0, 25, 50, 90];
 
@@ -157,6 +175,33 @@ export class QuestlogSettingTab extends PluginSettingTab {
         }),
       );
 
+    // The preset and the switches show each other's changes; `syncing` keeps those updates from saving again.
+    const toggles = new Map<ModuleId, ToggleComponent>();
+    let presetDrop: DropdownComponent | null = null;
+    let syncing = false;
+    const setModules = async (m: Modules) => {
+      plugin.settings.modules = m;
+      syncing = true;
+      try {
+        presetDrop?.setValue(presetOf(m));
+        for (const [id, tg] of toggles) tg.setValue(m[id]);
+      } finally {
+        syncing = false;
+      }
+      await save();
+      plugin.refreshViews();
+    };
+    const moduleRow = (id: ModuleId) =>
+      row(t(`mod.${id}` as Key), "set.alias.module", t(`mod.${id}Desc` as Key), (x) =>
+        x.addToggle((tg) => {
+          toggles.set(id, tg);
+          tg.setValue(plugin.settings.modules[id]).onChange(actWith(async (v: boolean) => {
+            if (syncing) return;
+            await setModules({ ...plugin.settings.modules, [id]: v });
+          }));
+        }),
+      );
+
     return [
       {
         rows: [
@@ -183,6 +228,28 @@ export class QuestlogSettingTab extends PluginSettingTab {
                 ),
               ),
           ),
+        ],
+      },
+      {
+        heading: t("set.modules"),
+        rows: [
+          row(t("set.preset"), "set.alias.preset", t("set.presetDesc"), (x) =>
+            x.addDropdown((d) => {
+              presetDrop = d;
+              for (const p of PRESET_IDS) d.addOption(p, t(`preset.${p}`));
+              d.addOption("custom", t("preset.custom"));
+              d.setValue(presetOf(plugin.settings.modules)).onChange(actWith(async (v) => {
+                if (syncing) return;
+                // "Custom" is only a label for hand-picked switches; picking it changes nothing.
+                if (v === "custom") {
+                  d.setValue(presetOf(plugin.settings.modules));
+                  return;
+                }
+                await setModules({ ...PRESETS[v as Preset] });
+              }));
+            }),
+          ),
+          ...MODULES.map(moduleRow),
         ],
       },
       {
@@ -282,8 +349,9 @@ export class QuestlogSettingTab extends PluginSettingTab {
   }
 }
 
-/** The weekly quest-hours target: the global setting, or the sum of the active quests' targets when it is 0. */
+/** The weekly quest-hours target: the global setting, or the sum of the active quests' targets when it is 0; 0 when hour targets are off. */
 export function weeklyTargetHours(s: QuestlogSettings, quests: Quest[]): number {
+  if (!isOn(s, "hours")) return 0;
   if (s.weeklyTarget > 0) return s.weeklyTarget;
   return quests.filter((q) => q.status === "active").reduce((a, q) => a + q.weeklyHours, 0);
 }

@@ -24,9 +24,36 @@ Manual installation: download `main.js`, `manifest.json` and `styles.css` from t
 ## Getting started
 
 1. Run **Questlog: Open** from the command palette, or click the target icon in the ribbon.
-2. Create a quest in the **Quests** tab and give it a *why* and a weekly hour target.
-3. Add a few tasks to today in **Home** or **Plan**.
+2. Create a quest on **Home** or in the **Quests** tab. A name is enough.
+3. Add a few tasks to today on **Home**.
 4. Open **Focus** and press **Start**.
+
+That is the whole core loop. Everything else is optional and can be switched off under **Settings → Modules** (see below).
+
+## Modules
+
+Questlog is a full goal system, but you only see the parts you use. **Settings → Modules** has a preset and one switch per module:
+
+| Preset | What you see |
+| --- | --- |
+| **Light** | Home, Focus and Calendar. No rituals, no hour targets. |
+| **Standard** | Light plus Plan, the weekly review, hour targets and the four rituals. The default for new installs. |
+| **Full** | Everything: also the longer reviews (month, quarter, year), stages and the story of a quest, and the vision and *why*. |
+
+| Module | Switches |
+| --- | --- |
+| **Plan** | The Plan tab. |
+| **Calendar** | The Calendar tab. |
+| **Review** | The Review tab and its badge. |
+| **Longer reviews** | Month, quarter and year in the Review tab. Needs Review. |
+| **Hour targets** | Weekly hours per quest, progress bars, the week dots and the quest check-in's *shrink*. |
+| **Stages and story** | Stages, the compass, the stage path and the story of a quest. With stages off, a quest lists all its open tasks. |
+| **Vision and why** | The vision on Home and in the quarter review, and each quest's *why*. |
+| **Ritual: …** | One switch per ritual (start the day, close the day, plan the week, quest check-in). The commands keep working. |
+
+Home, Focus, the timer, the done list, quests and *Other* are always there. Switching a module off only hides it: your notes, stages, hours and reviews stay as they are and come back when you switch it on again. After updating from an earlier version, everything stays on.
+
+Some things also stay hidden until you use them, whatever the switches say: the vision line while the vision is empty, the week dots and the check-in for a quest without an hour target, and the stage path for a quest without stages.
 
 ## Privacy
 
@@ -58,14 +85,14 @@ The layout adapts to the pane: a wide main tab, a narrow sidebar, or a phone. Al
 
 ## Rituals
 
-Four short routines live on Home. At most one of them is offered at a time, as a single line under the vision with a button and **Not now**. Nothing opens by itself, every step can be skipped, and a missed day or week is never counted against you.
+Four short routines live on Home (each can be switched off under **Settings → Modules**). At most one of them is offered at a time, as a single line under the vision with a button and **Not now**. Nothing opens by itself, every step can be skipped, and a missed day or week is never counted against you.
 
 | Ritual | Offered | What it does |
 | --- | --- | --- |
 | **Start the day** | Mornings, until the day is started | Pick the one thing that matters today from today's tasks (or one suggestion per quest with nothing planned), optionally add more, then start the timer on it or just finish. |
 | **Close the day** | From 16:00 on a day with logged time; the next morning when yesterday has untracked gaps | Fill or wave off the gaps between sessions, look at what you finished, write one sentence about the day, and decide where open tasks go (tomorrow, another day, the backlog, or leave them). |
 | **Plan the week** | Once this week's review is answered, or on Monday | Hours per quest for this or next week (prefilled from last time), a look at each quest's current stage, and a day for the tasks of the current stages. |
-| **Quest check-in** | When an active quest has had no time for a few full weeks (setting, default 3) | Keep, pause, shrink the weekly hours, or finish the quest, with an optional note. |
+| **Quest check-in** | When an active quest with an hour target has had no time for a few full weeks (setting, default 3) | Keep, pause, shrink the weekly hours, or finish the quest, with an optional note. |
 
 Each ritual is also a command, so you can open it at any time. **Not now** hides the line for the rest of the day (for the week planning: the week).
 

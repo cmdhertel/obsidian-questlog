@@ -1,5 +1,6 @@
 import type { LastWork } from "./model";
 import { NUDGE_OPTIONS } from "./nudge";
+import { mergeModules, type Modules } from "./modules";
 
 /** The keys of the settings that need more than a shallow merge. */
 export interface MergeShape {
@@ -7,6 +8,7 @@ export interface MergeShape {
   checkinWeeks: number;
   nudgeMinutes: number;
   lastWork: LastWork | null;
+  modules: Modules;
 }
 
 /** A stored question list: strings only (trimmed, empty lines dropped); anything else means "use the defaults". */
@@ -30,7 +32,10 @@ function validLastWork(v: unknown): LastWork | null {
     : null;
 }
 
-/** Stored data over the defaults: `rituals` merged one level deep, wrong types fall back, unknown keys are kept. Pure. */
+/**
+ * Stored data over the defaults: `rituals` and `modules` merged one level deep, wrong types fall back, unknown
+ * keys are kept. Empty stored data is a fresh install, which starts with the Standard modules. Pure.
+ */
 export function mergeSettings<T extends MergeShape>(defaults: T, stored: unknown): T {
   const data = isRecord(stored) ? stored : {};
   const rituals: Record<string, string | null> = { ...defaults.rituals };
@@ -51,5 +56,6 @@ export function mergeSettings<T extends MergeShape>(defaults: T, stored: unknown
     checkinWeeks: Math.min(8, Math.max(2, Math.round(num(data.checkinWeeks, defaults.checkinWeeks)))),
     nudgeMinutes: nudge(data.nudgeMinutes, defaults.nudgeMinutes),
     lastWork: validLastWork(data.lastWork),
+    modules: mergeModules(data.modules, Object.keys(data).length === 0),
   };
 }

@@ -5,7 +5,7 @@ import { addDays, fmtDuration, fmtHours, isoWeek, parseDay, weekDays } from "../
 import { minutesByQuest, totalMinutes } from "../../data/stats";
 import type { Quest, Session } from "../../data/model";
 import { OTHER_COLOR } from "../../data/store";
-import { weeklyQuestions, weeklyTargetHours } from "../../settings";
+import { isOn, weeklyQuestions, weeklyTargetHours } from "../../settings";
 import { fmtDate, t, weekdayShort } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { bar, button, dot, empty, iconButton, pageHead, questName, sectionHead, statCard } from "../components";
@@ -88,7 +88,8 @@ export function renderWeek(el: HTMLElement, ctx: Ctx): void {
     const pct = targetMin ? Math.round((min / targetMin) * 100) : null;
     r.createSpan({ cls: "ql-small " + (pct === null ? "ql-muted" : pct >= 100 ? "ql-good" : "ql-muted"), text: pct === null ? "" : `${pct}%` });
   };
-  for (const q of quests) row(q.name, q.color, byQuest.get(q.name) ?? 0, q.weeklyHours * 60);
+  const hours = isOn(ctx.plugin.settings, "hours");
+  for (const q of quests) row(q.name, q.color, byQuest.get(q.name) ?? 0, hours ? q.weeklyHours * 60 : 0);
   for (const name of orphan) row(name, OTHER_COLOR, byQuest.get(name) ?? 0, 0);
   if (otherMin) row(t("other.name"), OTHER_COLOR, otherMin, 0);
 

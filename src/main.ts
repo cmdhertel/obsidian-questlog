@@ -4,7 +4,7 @@ import type { StartOpts } from "./timer";
 import { QuestStore } from "./data/store";
 import { fmtElapsed, isoDay } from "./data/dates";
 import { ActivityCounter, nudgeDue } from "./data/nudge";
-import { DEFAULT_SETTINGS, QuestlogSettingTab, mergeSettings, type QuestlogSettings, type TabId } from "./settings";
+import { DEFAULT_SETTINGS, QuestlogSettingTab, mergeSettings, tabOn, type QuestlogSettings, type TabId } from "./settings";
 import { Timer } from "./timer";
 import { workTitle } from "./data/timerlog";
 import { act, questName } from "./ui/components";
@@ -68,7 +68,12 @@ export default class QuestlogPlugin extends Plugin {
       this.addCommand({
         id: `open-${tab}`,
         name: t("cmd.openTab", { tab: t(`tab.${tab}` as "tab.home") }),
-        callback: () => void this.openView(tab),
+        // A switched-off tab hides its command too.
+        checkCallback: (checking) => {
+          if (!tabOn(this.settings, tab)) return false;
+          if (!checking) void this.openView(tab);
+          return true;
+        },
       });
     }
     this.addCommand({
