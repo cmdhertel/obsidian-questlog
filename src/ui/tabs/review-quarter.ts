@@ -9,7 +9,7 @@ import { fmtDate, t } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { act, button, empty, questIcon, sectionHead } from "../components";
 import { VisionModal } from "../modals";
-import { periodQuestions } from "../../settings";
+import { isOn, periodQuestions } from "../../settings";
 import { stageLabel } from "../stagepath";
 import type { PeriodConfig, PeriodInfo } from "./review-periods";
 
@@ -19,7 +19,7 @@ const nextId = (p: string) => `ql-${p}-${++uid}`;
 export const QUARTER: PeriodConfig = {
   questions: (s) => periodQuestions(s, "quarter"),
   extras(el, ctx, info) {
-    visionCard(el, ctx, info);
+    if (isOn(ctx.plugin.settings, "vision")) visionCard(el, ctx, info);
     questDecisions(el, ctx, info);
   },
 };
@@ -78,7 +78,8 @@ function visionCard(el: HTMLElement, ctx: Ctx, info: PeriodInfo): void {
 }
 
 function questDecisions(el: HTMLElement, ctx: Ctx, info: PeriodInfo): void {
-  const { store, state } = ctx;
+  const { store, state, plugin } = ctx;
+  const on = { vision: isOn(plugin.settings, "vision"), stages: isOn(plugin.settings, "stages"), hours: isOn(plugin.settings, "hours") };
   const card = el.createDiv({ cls: "ql-card ql-section ql-decide" });
   sectionHead(card, t("review.quarterQuests"), "flag");
   const rows = quarterRows(
@@ -120,32 +121,37 @@ function questDecisions(el: HTMLElement, ctx: Ctx, info: PeriodInfo): void {
     questIcon(legend, q, "is-small");
     legend.createSpan({ text: q.name });
     if (paused) legend.createSpan({ cls: "ql-prow-status", text: t("review.status.paused") });
-    if (q.why) fs.createDiv({ cls: "ql-decide-why ql-small ql-muted", text: q.why });
+    if (q.why && on.vision) fs.createDiv({ cls: "ql-decide-why ql-small ql-muted", text: q.why });
 
     const facts = fs.createDiv({ cls: "ql-decide-facts" });
     facts.createSpan({ cls: "ql-mono", text: fmtHours(row.minutes) });
     facts.createSpan({ cls: "ql-small ql-muted", text: monthsLine(row, ctx.today) });
-    const cur = q.stages.length ? currentStage(q.stages) : null;
-    facts.createSpan({
-      cls: "ql-small ql-muted",
-      text: `${t("review.stage")}: ${q.stages.length ? (cur ? stageLabel(cur) : t("stage.allReached")) : "–"}`,
-    });
+    if (on.stages) {
+      const cur = q.stages.length ? currentStage(q.stages) : null;
+      facts.createSpan({
+        cls: "ql-small ql-muted",
+        text: `${t("review.stage")}: ${q.stages.length ? (cur ? stageLabel(cur) : t("stage.allReached")) : "–"}`,
+      });
+    }
 
     const controls = fs.createDiv({ cls: "ql-decide-controls" });
-    const hid = nextId("hours");
-    const hw = controls.createDiv({ cls: "ql-decide-hours" });
-    hw.createEl("label", { cls: "ql-small", text: t("review.weeklyHoursFor", { quest: q.name }), attr: { for: hid } });
-    const num = hw.createEl("input", { type: "number", attr: { id: hid, min: "0", step: "0.5", inputmode: "decimal" } });
-    num.value = input.hours;
-    num.oninput = () => {
-      if (!state.drafts.has(bk)) state.drafts.set(bk, String(row.weeklyHours));
-      state.drafts.set(hk, num.value);
-      input.hours = num.value;
-      clearApplied();
-    };
-    const base = state.drafts.get(bk);
-    if (base !== undefined && Number(base) !== row.weeklyHours) {
-      hw.createDiv({ cls: "ql-small ql-muted", text: t("review.changedElsewhere", { h: row.weeklyHours }) });
+    // With hour targets off the field is hidden and the hours stay as they are.
+    if (on.hours) {
+      const hid = nextId("hours");
+      const hw = controls.createDiv({ cls: "ql-decide-hours" });
+      hw.createEl("label", { cls: "ql-small", text: t("review.weeklyHoursFor", { quest: q.name }), attr: { for: hid } });
+      const num = hw.createEl("input", { type: "number", attr: { id: hid, min: "0", step: "0.5", inputmode: "decimal" } });
+      num.value = input.hours;
+      num.oninput = () => {
+        if (!state.drafts.has(bk)) state.drafts.set(bk, String(row.weeklyHours));
+        state.drafts.set(hk, num.value);
+        input.hours = num.value;
+        clearApplied();
+      };
+      const base = state.drafts.get(bk);
+      if (base !== undefined && Number(base) !== row.weeklyHours) {
+        hw.createDiv({ cls: "ql-small ql-muted", text: t("review.changedElsewhere", { h: row.weeklyHours }) });
+      }
     }
     radios<Decision>(
       controls,

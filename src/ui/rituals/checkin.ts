@@ -3,6 +3,7 @@ import { Notice, TFile } from "obsidian";
 import { parseDay } from "../../data/dates";
 import { CHECKIN_ACTIONS, parseCheckins, type CheckinAction } from "../../data/checkin";
 import { fmtDate, t } from "../../i18n";
+import { isOn } from "../../settings";
 import type { Ctx } from "../ctx";
 import { act, button, questIcon } from "../components";
 import { checkinQuestFor } from "../ritual";
@@ -32,7 +33,7 @@ export function renderCheckin(slot: HTMLElement, ctx: Ctx, questName: string): v
   card.style.setProperty("--ql-color", q.color);
   const head = card.querySelector(".ql-ritual-head");
   if (head) questIcon(head as HTMLElement, q, "is-small");
-  if (q.why) card.createDiv({ cls: "ql-ritual-why", text: `“${q.why}”` });
+  if (q.why && isOn(plugin.settings, "vision")) card.createDiv({ cls: "ql-ritual-why", text: `“${q.why}”` });
 
   let last: string | null = null;
   for (const s of store.allSessions()) if (s.quest === q.name && (!last || s.day > last)) last = s.day;
@@ -48,7 +49,10 @@ export function renderCheckin(slot: HTMLElement, ctx: Ctx, questName: string): v
     });
   }
 
-  const value = (state.drafts.get(ACTION) as CheckinAction | undefined) ?? "keep";
+  // "Shrink" sets fewer weekly hours, so it needs hour targets.
+  const actions: readonly CheckinAction[] = isOn(plugin.settings, "hours") ? CHECKIN_ACTIONS : CHECKIN_ACTIONS.filter((a) => a !== "shrink");
+  const stored = state.drafts.get(ACTION) as CheckinAction | undefined;
+  const value = stored && actions.includes(stored) ? stored : "keep";
   const name = groupName("checkin");
   const group = card.createDiv({ cls: "ql-radio-chips", attr: { role: "radiogroup", "aria-label": t("ritual.checkin.choice", { quest: q.name }) } });
   const hoursWrap = card.createDiv({ cls: "ql-ritual-field", attr: { "aria-live": "polite" } });
@@ -61,7 +65,7 @@ export function renderCheckin(slot: HTMLElement, ctx: Ctx, questName: string): v
     input.value = state.drafts.get(HOURS) ?? String(q.weeklyHours);
     input.oninput = () => state.drafts.set(HOURS, input.value);
   };
-  for (const a of CHECKIN_ACTIONS) {
+  for (const a of actions) {
     const chip = group.createEl("label", { cls: "ql-radio-chip" });
     const input = chip.createEl("input", { type: "radio", attr: { name, value: a } });
     input.checked = a === value;
@@ -85,7 +89,8 @@ export function renderCheckin(slot: HTMLElement, ctx: Ctx, questName: string): v
     acts,
     t("ritual.checkin.save"),
     act(async () => {
-      const a = (state.drafts.get(ACTION) as CheckinAction | undefined) ?? "keep";
+      const picked = state.drafts.get(ACTION) as CheckinAction | undefined;
+      const a = picked && actions.includes(picked) ? picked : "keep";
       let hours: number | undefined;
       if (a === "shrink") {
         const n = Number((state.drafts.get(HOURS) ?? String(q.weeklyHours)).replace(",", "."));

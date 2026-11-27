@@ -6,6 +6,7 @@ import { fmtClock, isoDay, minutesOfDay, parseClock } from "../data/dates";
 import { clampToday, midnightOf, minuteToMs, type StartClamp } from "../data/startearlier";
 import { resolveContinueSession } from "../data/lastwork";
 import { PALETTE } from "../data/store";
+import { moduleOn } from "../data/modules";
 import { t } from "../i18n";
 import { act } from "./components";
 
@@ -128,23 +129,29 @@ export class QuestModal extends Modal {
       x.inputEl.addClass("ql-wide");
       if (!q) x.inputEl.win.setTimeout(() => x.inputEl.focus(), 0);
     });
-    new Setting(this.contentEl)
-      .setName(t("quest.why"))
-      .setDesc(t("quest.whyDesc"))
-      .addTextArea((x) => {
-        x.setPlaceholder(t("quest.whyPh")).setValue(v.why).onChange((s) => (v.why = s));
-        x.inputEl.rows = 3;
-        x.inputEl.addClass("ql-wide");
-      });
-    new Setting(this.contentEl)
-      .setName(t("quest.hours"))
-      .setDesc(t("quest.hoursDesc"))
-      .addText((x) => {
-        x.inputEl.type = "number";
-        x.inputEl.min = "0";
-        x.inputEl.step = "0.5";
-        x.setValue(String(v.hours)).onChange((s) => (v.hours = Math.max(0, Number(s) || 0)));
-      });
+    // Fields of switched-off modules are hidden; their stored values are kept as they are.
+    const on = this.plugin.settings.modules;
+    if (moduleOn(on, "vision")) {
+      new Setting(this.contentEl)
+        .setName(t("quest.why"))
+        .setDesc(t("quest.whyDesc"))
+        .addTextArea((x) => {
+          x.setPlaceholder(t("quest.whyPh")).setValue(v.why).onChange((s) => (v.why = s));
+          x.inputEl.rows = 3;
+          x.inputEl.addClass("ql-wide");
+        });
+    }
+    if (moduleOn(on, "hours")) {
+      new Setting(this.contentEl)
+        .setName(t("quest.hours"))
+        .setDesc(t("quest.hoursDesc"))
+        .addText((x) => {
+          x.inputEl.type = "number";
+          x.inputEl.min = "0";
+          x.inputEl.step = "0.5";
+          x.setValue(String(v.hours)).onChange((s) => (v.hours = Math.max(0, Number(s) || 0)));
+        });
+    }
 
     // Color swatches + custom picker
     const colorSet = new Setting(this.contentEl).setName(t("quest.color"));

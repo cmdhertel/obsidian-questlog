@@ -5,7 +5,7 @@ import type { Quest, Task } from "../../data/model";
 import { planPrefill, questFocusTasks, weekToPlan } from "../../data/rituals";
 import { currentStage } from "../../data/stages";
 import { totalMinutes } from "../../data/stats";
-import { weeklyTargetHours } from "../../settings";
+import { isOn, weeklyTargetHours } from "../../settings";
 import { fmtDate, t } from "../../i18n";
 import type { Ctx } from "../ctx";
 import { act, button, questIcon, questName, segmented, taskKey } from "../components";
@@ -53,8 +53,10 @@ export function renderPlanWeek(slot: HTMLElement, ctx: Ctx): void {
     },
   );
 
-  const steps: Step[] = ["hours"];
-  if (quests.some((q) => q.stages.length)) steps.push("stages");
+  // Steps of switched-off modules are left out; Finish still saves the hours, which marks the week as planned.
+  const steps: Step[] = [];
+  if (isOn(plugin.settings, "hours")) steps.push("hours");
+  if (isOn(plugin.settings, "stages") && quests.some((q) => q.stages.length)) steps.push("stages");
   steps.push("days");
   const i = stepIndex(ctx, steps.length);
   const step = steps[i]!;
@@ -203,6 +205,7 @@ function renderDays(card: HTMLElement, ctx: Ctx, week: string, days: string[], q
     for (const d of days) chip(d, t(`wd.short.${parseDay(d).getDay()}` as "wd.short.0"), fmtDate(parseDay(d), { weekday: "long", day: "numeric", month: "long" }));
     chip(null, t("ritual.plan.later"), t("ritual.plan.later"));
   }
+  if (!isOn(ctx.plugin.settings, "plan")) return;
   const link = card.createDiv({ cls: "ql-ritual-link" });
   button(
     link,

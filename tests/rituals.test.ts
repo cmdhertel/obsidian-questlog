@@ -39,6 +39,18 @@ function input(o: Partial<RitualInput> & { plan?: string[] } = {}): RitualInput 
 }
 
 describe("pickRitual", () => {
+  it("skips a switched-off ritual so the next one can show", () => {
+    const evening = { nowMin: at(17), todayHasSessions: true, checkinQuest: "Q" };
+    expect(pickRitual(input(evening))).toBe("close-day");
+    expect(pickRitual(input({ ...evening, enabled: { close: false } }))).toBe("check-in");
+    expect(pickRitual(input({ ...evening, enabled: { close: false, checkin: false } }))).toBeNull();
+    expect(pickRitual(input({ enabled: { start: false } }))).toBeNull();
+    expect(pickRitual(input({ enabled: { start: true } }))).toBe("start-day");
+    const yesterday = { yesterdayHasSessions: true, yesterdayHasGaps: true };
+    expect(pickRitual(input(yesterday))).toBe("close-yesterday");
+    expect(pickRitual(input({ ...yesterday, enabled: { close: false } }))).toBe("start-day");
+  });
+
   it("1. start-day in the morning until 13:59", () => {
     expect(pickRitual(input())).toBe("start-day");
     expect(pickRitual(input({ nowMin: at(13, 59) }))).toBe("start-day");

@@ -1,6 +1,6 @@
 import { ItemView, Platform, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
 import type QuestlogPlugin from "../main";
-import type { TabId } from "../settings";
+import { isOn, tabOn, type TabId } from "../settings";
 import { isoDay } from "../data/dates";
 import { minutesByTask } from "../data/stats";
 import { t } from "../i18n";
@@ -211,6 +211,8 @@ export class QuestlogView extends ItemView {
   }
 
   showTab(tab: TabId): void {
+    // A switched-off tab (from an old link or command) lands on Home.
+    if (!tabOn(this.plugin.settings, tab)) tab = "home";
     if (tab !== "focus" && this.state.zen) {
       this.state.zen = null;
       this.contentEl.removeClass("is-zen");
@@ -262,16 +264,20 @@ export class QuestlogView extends ItemView {
 
   private render(): void {
     this.deferred = false;
+    const settings = this.plugin.settings;
+    if (!tabOn(settings, this.tab)) this.tab = "home";
+    if (!isOn(settings, "longReviews")) this.state.reviewPeriod = "week";
     const scroll = this.bodyEl.scrollTop;
     const focused = this.contentEl.doc.activeElement;
     const addKey = focused?.instanceOf(HTMLInputElement) && this.contentEl.contains(focused) ? focused.dataset.addKey : undefined;
     const addValue = addKey && focused?.instanceOf(HTMLInputElement) ? focused.value : "";
     const boards = Array.from(this.bodyEl.querySelectorAll<HTMLElement>("[data-scroll-key]")).map((el) => [el.dataset.scrollKey, el.scrollLeft] as const);
     const reviewDue =
-      new Date().getDay() === this.plugin.settings.reviewDay && this.plugin.store.reviewMissing(isoDay(new Date()));
+      isOn(settings, "review") && new Date().getDay() === settings.reviewDay && this.plugin.store.reviewMissing(isoDay(new Date()));
 
     this.tabsEl.empty();
     for (const { id, icon } of TABS) {
+      if (!tabOn(settings, id)) continue;
       const b = this.tabsEl.createEl("button", {
         cls: "ql-tab" + (id === this.tab ? " is-active" : ""),
         attr: { role: "tab", "aria-selected": String(id === this.tab), "aria-label": t(`tab.${id}` as "tab.home") },

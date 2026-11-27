@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mergeSettings } from "../src/data/settings-merge";
 import { formatDate } from "../src/i18n/format";
+import { MODULES, PRESETS, mergeModules, moduleOn, presetOf } from "../src/data/modules";
 
 const defaults = {
   folder: "Questlog",
@@ -8,7 +9,46 @@ const defaults = {
   checkinWeeks: 3,
   nudgeMinutes: 15,
   lastWork: null as { taskId: string; taskText: string; quest: string } | null,
+  modules: { ...PRESETS.full },
 };
+
+describe("modules", () => {
+  it("starts a fresh install with Standard and keeps an existing one on Full", () => {
+    expect(mergeSettings(defaults, {}).modules).toEqual(PRESETS.standard);
+    expect(mergeSettings(defaults, { folder: "X" }).modules).toEqual(PRESETS.full);
+  });
+
+  it("merges stored switches over the base and drops wrong types", () => {
+    const m = mergeSettings(defaults, { folder: "X", modules: { plan: false, hours: "no", bogus: true } }).modules;
+    expect(m).toEqual({ ...PRESETS.full, plan: false });
+    expect(m).not.toHaveProperty("bogus");
+    expect(mergeModules([], true)).toEqual(PRESETS.standard);
+    expect(mergeModules({ vision: true }, true)).toEqual({ ...PRESETS.standard, vision: true });
+  });
+
+  it("does not share the preset objects", () => {
+    const m = mergeModules(undefined, false);
+    m.plan = false;
+    expect(PRESETS.full.plan).toBe(true);
+  });
+
+  it("names the preset the switches match", () => {
+    expect(presetOf(PRESETS.light)).toBe("light");
+    expect(presetOf(PRESETS.standard)).toBe("standard");
+    expect(presetOf(PRESETS.full)).toBe("full");
+    expect(presetOf({ ...PRESETS.standard, vision: true })).toBe("custom");
+  });
+
+  it("has presets with every module and Light keeps the calendar only", () => {
+    for (const p of Object.values(PRESETS)) expect(Object.keys(p).sort()).toEqual([...MODULES].sort());
+    expect(MODULES.filter((k) => PRESETS.light[k])).toEqual(["calendar"]);
+  });
+
+  it("turns the longer reviews off with the review", () => {
+    expect(moduleOn({ ...PRESETS.full, review: false }, "longReviews")).toBe(false);
+    expect(moduleOn(PRESETS.full, "longReviews")).toBe(true);
+  });
+});
 
 describe("mergeSettings", () => {
   it("fills missing keys with defaults", () => {
@@ -54,8 +94,8 @@ describe("mergeSettings", () => {
 
   it("keeps unknown keys and survives non-object input", () => {
     expect(mergeSettings(defaults, { future: 1 })).toHaveProperty("future", 1);
-    expect(mergeSettings(defaults, null)).toEqual(defaults);
-    expect(mergeSettings(defaults, "x")).toEqual(defaults);
+    expect(mergeSettings(defaults, null)).toEqual({ ...defaults, modules: PRESETS.standard });
+    expect(mergeSettings(defaults, "x")).toEqual({ ...defaults, modules: PRESETS.standard });
   });
 });
 
