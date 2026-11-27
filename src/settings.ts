@@ -42,6 +42,8 @@ export interface QuestlogSettings {
   calendarView: "auto" | "day" | "week";
   /** Which modules are shown; off only hides, the data stays. */
   modules: Modules;
+  /** Plan layout: one day beside the backlog, the week board, or "auto" (one day on narrow panes, else the week). */
+  planView: "auto" | "day" | "week";
 }
 
 export const DEFAULT_SETTINGS: QuestlogSettings = {
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: QuestlogSettings = {
   lastWork: null,
   calendarView: "auto",
   modules: { ...PRESETS.standard },
+  planView: "auto",
 };
 
 /** Whether a module is on. */

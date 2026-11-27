@@ -230,6 +230,8 @@ export interface TaskRowOpts {
   hint?: string;
   /** Clamp the text to three lines with a button to show all of it (#27, board cards). */
   expandable?: boolean;
+  /** One-click button that plans the open task for this day (Plan backlog: no dragging across the board). */
+  planTo?: string;
 }
 
 /** Show the expand button of every clamped task text under `root` whose text is really cut off. */
@@ -317,6 +319,11 @@ export function taskRow(parent: HTMLElement, ctx: Ctx, task: Task, opts: TaskRow
   }
 
   const actions = row.createDiv({ cls: "ql-task-actions" });
+  if (opts.planTo && !task.done) {
+    const day = opts.planTo;
+    const label = day === ctx.today ? t("plan.addToday") : t("plan.planFor", { day: dayHint(day, ctx.today) });
+    iconButton(actions, day === ctx.today ? "sun" : "calendar-plus", label, act(() => ctx.store.moveToDay(task, day)), "ql-task-plan");
+  }
   if (!task.done && quest && (running || store.isWorkable(quest))) {
     playButton(actions, ctx, { kind: "task", task, quest }, { cls: "ql-task-play" });
   }

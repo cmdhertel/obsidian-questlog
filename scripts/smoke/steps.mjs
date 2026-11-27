@@ -1228,4 +1228,61 @@ export const steps = [
       assert(!bad.length, bad.join(" | "));
     },
   },
+  // ---------------------------------------------------------------- plan day view
+  {
+    name: "plan-day-view",
+    issue: "plan-day",
+    each: true,
+    run: async (ctx) => {
+      const snap = await snapshot(ctx);
+      try {
+        await ev(ctx, `P.settings.planView="auto"; await P.saveSettings();`);
+        await tab(ctx, "plan");
+        const auto = await ev(ctx, `return {day:!!R().querySelector(".ql-dayboard"), narrow:R().classList.contains("ql-w-narrow")}`);
+        assert(auto.day === auto.narrow, `auto layout: ${JSON.stringify(auto)}`);
+        // Week view: backlog tasks have a one-click "plan for today" button.
+        if (!auto.day) assert(await ev(ctx, `return !!R().querySelector(".ql-board .ql-col-backlog .ql-task-plan")`), "no sun button in the week backlog");
+        await clickIn(ctx, ".ql-cal-switch .ql-seg-btn", /^(Day|Tag)/);
+        const d = await ev(ctx, String.raw`
+          const v=R(), body=v.querySelector(".ql-body"), board=v.querySelector(".ql-dayboard");
+          return {board:!!board, strip:v.querySelectorAll(".ql-plan-strip .ql-cal-strip-day").length,
+            pressed:v.querySelectorAll('.ql-plan-strip [aria-pressed="true"]').length,
+            backlog:!!board?.querySelector(".ql-col-backlog"), days:board?.querySelectorAll(".ql-col-day").length,
+            overflow:body.scrollWidth-body.clientWidth, saved:P.settings.planView};`);
+        assert(d.board && d.strip === 7 && d.pressed === 1 && d.backlog && d.days === 1 && d.saved === "day", `day view: ${JSON.stringify(d)}`);
+        assert(d.overflow <= 1, `day view scrolls sideways by ${d.overflow}px`);
+        // The sun button plans a backlog task for today.
+        await ev(ctx, `const f=R().querySelector(".ql-backlog-fold[aria-expanded=false]"); if (f) { f.click(); await sleep(400); }`);
+        const key = await ev(ctx, `const row=R().querySelector(".ql-col-backlog .ql-task"); const b=row?.querySelector(".ql-task-plan"); if(!b) return null; b.click(); return row.dataset.key;`);
+        assert(key, "no backlog task with a sun button");
+        await wait(ctx, `(()=>{const today=window.moment().format("YYYY-MM-DD"); const x=P.store.allTasks().find(t=>(t.id||t.questPath+"#"+t.line)===${JSON.stringify(key)}); return x && P.store.scheduledDay(x,today)===today})()`, "the task to be planned for today");
+        await wait(ctx, `[...R().querySelectorAll(".ql-col-day .ql-task")].some(e=>e.dataset.key===${JSON.stringify(key)})`, "the task in the day column");
+        await ctx.shot("plan-day-view-day");
+        // Dropping a backlog task on a later day of the strip plans it there.
+        const drop = await ev(ctx, String.raw`
+          const v=R(); const target=[...v.querySelectorAll(".ql-plan-strip .ql-cal-strip-day:not(.is-past):not(.is-active)")][0];
+          const row=v.querySelector(".ql-col-backlog .ql-task.is-draggable");
+          if(!target||!row) return {skip:true};
+          const dt=new DataTransfer(); row.dispatchEvent(new DragEvent("dragstart",{bubbles:true,dataTransfer:dt}));
+          target.dispatchEvent(new DragEvent("dragover",{bubbles:true,cancelable:true,dataTransfer:dt}));
+          const lit=target.classList.contains("is-drop");
+          target.dispatchEvent(new DragEvent("drop",{bubbles:true,cancelable:true,dataTransfer:dt}));
+          row.dispatchEvent(new DragEvent("dragend",{bubbles:true}));
+          const i=[...v.querySelectorAll(".ql-plan-strip .ql-cal-strip-day")].indexOf(target);
+          return {key:row.dataset.key, lit, i};`);
+        if (!drop.skip) {
+          assert(drop.lit, "the strip day does not light up on drag over");
+          const vday = await ev(ctx, `return app.workspace.getLeavesOfType("questlog-view")[0].view.state.planDay`);
+          await wait(ctx, `(()=>{const x=P.store.allTasks().find(t=>(t.id||t.questPath+"#"+t.line)===${JSON.stringify(drop.key)}); const d=x&&P.store.scheduledDay(x,${JSON.stringify(vday)}); return d && d>${JSON.stringify(vday)}})()`, "the dropped task on a later day");
+        }
+        // Back to the week board.
+        await clickIn(ctx, ".ql-cal-switch .ql-seg-btn", /^(Week|Woche)/);
+        const w = await ev(ctx, `return {board:!!R().querySelector(".ql-board"), day:!!R().querySelector(".ql-dayboard"), saved:P.settings.planView}`);
+        assert(w.board && !w.day && w.saved === "week", `week view: ${JSON.stringify(w)}`);
+      } finally {
+        await ev(ctx, `P.settings.planView="auto"; await P.saveSettings(); const v=app.workspace.getLeavesOfType("questlog-view")[0]?.view; if (v) v.state.planDay=window.moment().format("YYYY-MM-DD");`);
+        await restore(ctx, snap);
+      }
+    },
+  },
 ];
