@@ -194,6 +194,9 @@ const en = {
   "ritual.checkin.gone": "The quest is no longer there.",
 
   "plan.title": "Plan the week",
+  "plan.titleDay": "Plan the day",
+  "plan.view": "Plan view",
+  "plan.planFor": "Plan for {day}",
   "plan.backlog": "Backlog",
   "plan.backlogEmpty": "Every open task is scheduled.",
   "plan.dayEmpty": "Nothing planned.",

@@ -1315,6 +1315,17 @@ button.ql-stage-toggle:hover { background: var(--background-modifier-hover); }
   .ql-search-clear { min-width: 44px; min-height: 44px; }
 }
 
+/* Plan day view: the week strip (days are drop targets), then the backlog right beside one day. */
+.ql-page-plan.is-day { max-width: 1080px; }
+.ql-plan-strip .ql-cal-strip-day.is-past { opacity: 0.6; }
+.ql-plan-strip .ql-cal-strip-day.is-drop { border-color: var(--interactive-accent); border-style: dashed; background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); }
+.ql-plan-strip .ql-cal-strip-day.is-today .ql-cal-wd { color: var(--text-accent); }
+.ql-dayboard { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(0, 3fr); gap: var(--size-4-2); align-items: start; }
+.ql-w-narrow .ql-dayboard { grid-template-columns: minmax(0, 1fr); }
+.ql-w-narrow .ql-dayboard .ql-col-backlog { order: 2; }
+.ql-dayboard .ql-col-day .ql-list { min-height: 160px; }
+.questlog .ql-dayboard [hidden], .questlog .ql-dayboard .ql-backlog-body[hidden] { display: none; }
+
 /* ---------------------------------------------------------------- calendar day view */
 
 .ql-cal-switch { flex: none; }

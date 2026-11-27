@@ -196,6 +196,9 @@ const de: Record<keyof typeof en, string> = {
   "ritual.checkin.gone": "Die Quest ist nicht mehr da.",
 
   "plan.title": "Woche planen",
+  "plan.titleDay": "Tag planen",
+  "plan.view": "Planansicht",
+  "plan.planFor": "Für {day} einplanen",
   "plan.backlog": "Backlog",
   "plan.backlogEmpty": "Alle offenen Aufgaben sind eingeplant.",
   "plan.dayEmpty": "Nichts geplant.",
